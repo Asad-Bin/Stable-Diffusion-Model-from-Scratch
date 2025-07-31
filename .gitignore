@@ -1,0 +1,7 @@
+output/output_*_*/checkpoints/
+output/output_*_*/training_outputs/
+*/__pycache__/
+*/__init__.py/
+venv/
+dataset/huggingface_butterflies/
+task1.code-workspace
