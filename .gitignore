@@ -7,7 +7,7 @@ output/output_*_*/training_outputs/
 vae_train/checkpoints/
 vae_train/saved_images/
 vae_train/test_images/
-vae_train/test_outputs/
+vae_train/testing_outputs/
 vae_train/*.out
 venv/
 task1.code-workspace

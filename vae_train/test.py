@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description="")
 # parser.add_argument('--idx', type=int, required=True, help='image index to test')
 # idx = parser.parse_args().idx
 
-chkpnt_epoch = 100  # Change this to the epoch you want to evaluate
+chkpnt_epoch = 200  # Change this to the epoch you want to evaluate
 def evaluate_vae(model_ckpt_dir):
     # Load model
     encoder = Encoder().to(device)

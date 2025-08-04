@@ -1,7 +1,7 @@
 import os
 import shutil
 
-copy_target = 100
+copy_target = 200
 
 def copy_files(file1, file2, source_dir, target_dir):
     os.makedirs(target_dir, exist_ok=True)  # create target folder if it doesn't exist
