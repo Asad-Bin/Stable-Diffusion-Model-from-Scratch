@@ -27,7 +27,7 @@ class AttentionBlock(nn.Module):
         return x + self.proj(attn_out)
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, time_emb_dim=None, num_groups=16):
+    def __init__(self, in_channels, out_channels, time_emb_dim=None, num_groups=8):
         super().__init__()
         self.time_emb_dim = time_emb_dim
         self.time_emb_proj = nn.Linear(time_emb_dim, out_channels) if time_emb_dim else None
@@ -52,7 +52,7 @@ class ConvBlock(nn.Module):
         return x
 
 class DownBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, time_emb_dim=None, use_attn=False, num_groups=16):
+    def __init__(self, in_channels, out_channels, time_emb_dim=None, use_attn=False, num_groups=8):
         super().__init__()
         self.conv = ConvBlock(in_channels, out_channels, time_emb_dim, num_groups)
         self.attn = AttentionBlock(out_channels) if use_attn else nn.Identity()
@@ -65,7 +65,7 @@ class DownBlock(nn.Module):
         return x, x_pooled
 
 class UpBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, use_attn=False, num_groups=16):
+    def __init__(self, in_channels, skip_channels, out_channels, use_attn=False, num_groups=8):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv = ConvBlock(skip_channels + out_channels, out_channels, time_emb_dim=None, num_groups=num_groups)

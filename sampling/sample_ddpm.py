@@ -1,7 +1,7 @@
 import torch
 
 from config.config import *
-from pre_vae.pre_vae import vae
+# from pre_vae.pre_vae import vae
 
 
 @torch.no_grad()
@@ -30,10 +30,11 @@ def sample_ddpm(model, betas, shape, device, vae=vae, timesteps=timesteps):
     if vae is not None:
         vae = vae.to(device).half()
         
-        latent_unscaled = (x * vae.config.latent_magnitude) + vae.config.latent_shift
-        latent_unscaled = latent_unscaled.half()
+        # latent_unscaled = (x * vae.config.latent_magnitude) + vae.config.latent_shift
+        x = (x * latent_magnitude) + latent_shift
+        x = x.half()
 
-        decoded = vae.decode(latent_unscaled).sample  # extract tensor
+        decoded = vae.decode(x)  # extract tensor
         sampled = decoded.clamp(-1, 1)                # clamp the tensor
 
 

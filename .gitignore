@@ -1,7 +1,13 @@
+
+*/__pycache__/
+dataset/huggingface_butterflies/
+mlruns/
 output/output_*_*/checkpoints/
 output/output_*_*/training_outputs/
-*/__pycache__/
-*/__init__.py/
+vae_train/checkpoints/
+vae_train/saved_images/
+vae_train/test_images/
+vae_train/test_outputs/
+vae_train/*.out
 venv/
-dataset/huggingface_butterflies/
 task1.code-workspace

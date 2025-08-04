@@ -6,7 +6,7 @@ from datasets import load_dataset
 
 from config.config import *
 from utils.debug import *
-from pre_vae.pre_vae import vae
+# from pre_vae.pre_vae import vae
 
 # --------------------------------------------------
 # Dataset that loads HuggingFace images
@@ -32,20 +32,30 @@ def cache_latents_to_disk(dataset, save_dir="cached_latents"):
     os.makedirs(save_dir, exist_ok=True)
     vae.eval().to(device).half()
 
+    all_latents = []
     for idx in range(len(dataset)):
         image, _ = dataset[idx]
         image = image.to(device).half().unsqueeze(0)
+
         with torch.no_grad():
-            latents = vae.encode(image).latents
+            latents = vae.encode(image)
+            latents = (latents - latent_shift) / latent_magnitude
+            # latents = latents * scaling_factor
+            all_latents.append(latents)
         # print(latents.mean(), latents.var())
-        latents = (latents - vae.config.latent_shift) / vae.config.latent_magnitude
+        # latents = (latents - vae.config.latent_shift) / vae.config.latent_magnitude
+        # all_latents.append(latents)
         save_path = os.path.join(save_dir, f"{idx}.pt")
         torch.save(latents.squeeze(0).cpu(), save_path)
         if idx % 100 == 0:
             print(f"Saved latent {idx} to {save_path}")
+    
+    all_latents = torch.concat(all_latents, dim=0)
+    print(f"Latents shape: {all_latents.shape}, mean: {all_latents.mean()}, var: {all_latents.var()}, std: {all_latents.std()}")
+    print(all_latents.min(), all_latents.max())
 
     print(f"✅ Cached {len(dataset)} latent files to {save_dir}")
-    vae.to("cpu")  # free GPU
+    # vae.to("cpu")  # free GPU
 
 # --------------------------------------------------
 # Dataset for cached latents

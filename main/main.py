@@ -17,8 +17,9 @@ from noise.noise_generation import linear_beta_schedule, prepare_alphas, forward
 from sampling.sample_ddpm import sample_ddpm
 from utils.gradient_descent import plot_and_log_grad_norms
 from main import old_run
+from main.old_run import old_run_data
 
-from pre_vae.pre_vae import *
+# from pre_vae.pre_vae import *
 from utils.debug import *
 # ...existing code...
 
@@ -32,7 +33,8 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
     start_epoch = 0
     if old_run == True:
-        checkpoint, start_epoch = old_run
+        checkpoint, start_epoch = old_run_data()
+
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -81,23 +83,22 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
 
             if is_ml_flow_off == False: 
-
                 for name, param in model.named_parameters():
-                    if param.grad is not None:
+                    if param.grad is not None and "weight" in name:
                         first_layers = [
-                            "enc_conv1_1", "enc_conv2_1", "enc_conv3_1",
-                            "base1",
-                            "dec_conv3_1", "dec_conv2_1", "dec_conv1_1"
+                            "enc1", "enc2", "enc3",
+                            "base",
+                            "dec1", "dec2", "dec3"
                         ]
-                        if any(layer in name for layer in first_layers):
-                            layer_name = name.split(".")[0]  # 'enc_conv1_1'
-                            param_type = "weight" if "weight" in name else "bias"
-                            key = f"{param_type}_{layer_name}"
+                        # if any(layer in name for layer in first_layers):
+                        #     layer_name = name.split(".")[0]  # 'enc_conv1_1'
+                        #     param_type = "weight" if "weight" in name else "bias"
+                        #     key = f"{param_type}_{layer_name}"
 
-                            grad_norm = param.grad.data.norm(2).item()
+                        grad_norm = param.grad.data.norm(2).item()
 
-                            grad_sums[key] = grad_sums.get(key, 0.0) + grad_norm
-                            grad_counts[key] = grad_counts.get(key, 0) + 1
+                        grad_sums[name] = grad_sums.get(name, 0.0) + grad_norm
+                        grad_counts[name] = grad_counts.get(name, 0) + 1
 
             total_loss += loss.item()
             optimizer.step()
@@ -108,9 +109,9 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
         if is_ml_flow_off == True:
             continue
-        for key in grad_sums:
-            avg_norm = grad_sums[key] / grad_counts[key]
-            mlflow.log_metric(f"grad_norm_{key}", avg_norm, step=epoch)
+        for name in grad_sums:
+            avg_norm = grad_sums[name] / grad_counts[name]
+            mlflow.log_metric(f"grad_norm_{name}", avg_norm, step=epoch)
 
         def log_grad_plots():
             client = MlflowClient()
@@ -200,7 +201,8 @@ if __name__ == '__main__':
         output_ch=4,
         base_ch=64,
         time_emb_dim=128,
-        time_steps=timesteps
+        time_steps=timesteps,
+        num_groups=8
     ).to(device)
 
     print("Num params: ", sum(p.numel() for p in model.parameters()))

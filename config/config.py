@@ -4,11 +4,12 @@ import os
 import json
 import datetime
 
+
 def get_unique_output_dir(base_dir):
     base_dir = os.path.abspath(base_dir)
     os.makedirs(base_dir, exist_ok=True)  # Ensure parent exists
     # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    timestamp = os.environ.get("MY_TIMESTAMP")
+    timestamp = os.environ.get("MY_TIMESTAMP") or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_dir = os.path.join(base_dir, f"output_{timestamp}")
     os.makedirs(unique_dir, exist_ok=True)
     return unique_dir
@@ -33,8 +34,8 @@ dataset_dir = "./dataset/huggingface_butterflies"
 os.makedirs(dataset_dir, exist_ok=True)
 
 note = (
-    "Used 4 blocks of encoder decoder\n"
-    "       Used 3 attention at enc4, bottleneck & dec4,\n"
+    "Used 3 blocks of encoder decoder\n"
+    "       Used 3 attention at enc3, bottleneck & dec3,\n"
     "       last conv layer of each block has 'Silu',\n"
     "       no scaling factor, but norm\n"
     "       decoder time emb removed,\n"
@@ -83,10 +84,10 @@ print_config(CONFIG)
 # ------------------- LOGGING ------------------- #
 def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    mlflow.set_experiment("asad - pre_vae + unet 2")
+    mlflow.set_experiment("asad - custom_vae + unet")
     if old_run:
-        mlflow.start_run(run_id='4a0cff8f6f1a43d281032dda5d57a609')
-    if not is_ml_flow_off:
+        mlflow.start_run(run_id='14f3dbe13522438ea78ef8c60fbdfd5c')
+    elif not is_ml_flow_off:
         for k, v in cfg.items():
             mlflow.log_param(k, v)
 
@@ -107,8 +108,23 @@ def write_config_readme(cfg, output_dir):
 # ------------------- EXECUTE LOGGING ------------------- #
 is_ml_flow_off = False
 old_run = False
-old_run_checkpoint_no = 5
+old_run_checkpoint_no = 600
 
 log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
 log_config_local(CONFIG, CONFIG["output_dir"])
 write_config_readme(CONFIG, CONFIG["output_dir"])
+
+
+# ------------------- VAE SETTINGS  ------------------- #
+# from pre_vae.pre_vae import vae
+from vae_custom.custom_vae_wrap import load_custom_vae
+
+vae = load_custom_vae(
+    encoder_ckpt_path="./vae_custom/checkpoints/encoder.pt",
+    decoder_ckpt_path="./vae_custom/checkpoints/decoder.pt",
+    device=device
+)
+
+latent_shift = 0.173095703125
+latent_magnitude = 1.326171875
+scaling_factor = 3.0/8.5
