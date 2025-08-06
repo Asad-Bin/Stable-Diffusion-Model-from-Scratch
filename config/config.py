@@ -86,7 +86,7 @@ def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
     mlflow.set_experiment("asad - custom_vae + unet")
     if old_run:
-        mlflow.start_run(run_id='14f3dbe13522438ea78ef8c60fbdfd5c')
+        mlflow.start_run(run_id='a4ade43053f94ec49aed45d922be215f')
     elif not is_ml_flow_off:
         for k, v in cfg.items():
             mlflow.log_param(k, v)
@@ -107,8 +107,9 @@ def write_config_readme(cfg, output_dir):
 
 # ------------------- EXECUTE LOGGING ------------------- #
 is_ml_flow_off = False
-old_run = False
-old_run_checkpoint_no = 600
+old_run = True
+old_run_checkpoint_no = 200
+old_checkpoint_dir = "/home/asad/task1/output/output_20250806_103432/checkpoints/"
 
 log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
 log_config_local(CONFIG, CONFIG["output_dir"])
@@ -125,6 +126,6 @@ vae = load_custom_vae(
     device=device
 )
 
-latent_shift = 0.173095703125
-latent_magnitude = 1.326171875
+latent_shift = -0.09661865234375
+latent_magnitude = 1.0380859375
 scaling_factor = 3.0/8.5

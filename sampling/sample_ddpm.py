@@ -34,7 +34,7 @@ def sample_ddpm(model, betas, shape, device, vae=vae, timesteps=timesteps):
         x = (x * latent_magnitude) + latent_shift
         x = x.half()
 
-        decoded = vae.decode(x)  # extract tensor
+        decoded = vae.decoder(x)  # extract tensor
         sampled = decoded.clamp(-1, 1)                # clamp the tensor
 
 

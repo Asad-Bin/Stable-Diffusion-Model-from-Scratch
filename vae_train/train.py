@@ -16,7 +16,8 @@ import mlflow.pytorch
 
 mlflow.set_tracking_uri("http://127.0.0.1:5000")
 mlflow.set_experiment("Custom_VAE_Training")
-mlflow.start_run(run_name="vae_run")
+# mlflow.start_run(run_name="vae_run")
+mlflow.start_run(run_id="a09e56492b9e4607a2490588db3b8f5c")
 mlflow.log_params({
     "num_epochs": num_epochs,
     "learning_rate": learning_rate,
@@ -51,15 +52,35 @@ def save_images(epoch, originals, reconstructions, save_dir_base="vae_train/save
     #     vutils.save_image(test_interleaved, os.path.join(save_dir, "test_recon.png"), nrow=2)
     print(f"Saved images for epoch {epoch} to {save_dir}")
 
+
+
 # Assuming you instantiate encoder and decoder objects somewhere, e.g.:
 encoder = Encoder().to(device)
 decoder = Decoder().to(device)
+
+resume_epoch = 500  # set this to the epoch number of the checkpoint you want to resume from
+enc_path = f"{checkpoint_dir}/encoder_epoch_{resume_epoch}.pt"
+dec_path = f"{checkpoint_dir}/decoder_epoch_{resume_epoch}.pt"
+
+if os.path.exists(enc_path) and os.path.exists(dec_path):
+    encoder.load_state_dict(torch.load(enc_path, map_location=device))
+    decoder.load_state_dict(torch.load(dec_path, map_location=device))
+    print(f"Resumed encoder and decoder from epoch {resume_epoch}")
+else:
+    print("Checkpoint not found. Starting from scratch.")
+    resume_epoch = 0
+
+
+print(sum(p.numel() for p in encoder.parameters() if p.requires_grad) + sum(p.numel() for p in decoder.parameters() if p.requires_grad))
 
 # Combine parameters
 model_params = list(encoder.parameters()) + list(decoder.parameters())
 
 optimizer = torch.optim.AdamW(model_params, lr=learning_rate)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
+
+# optimizer.load_state_dict(torch.load("optimizer.pt"))
+# scheduler.load_state_dict(torch.load("scheduler.pt"))
 
 beta = 0.1
 def kl_divergence(mu, logvar):
@@ -74,7 +95,7 @@ mseloss = nn.MSELoss()
 def get_beta(epoch, max_beta=1e-4, warmup_epochs=10):
     return max_beta * min(1.0, epoch / warmup_epochs)
 
-for epoch in range(num_epochs):
+for epoch in range(resume_epoch, num_epochs):
     total_kl = 0.0
     total_recon = 0.0
     total_loss = 0.0

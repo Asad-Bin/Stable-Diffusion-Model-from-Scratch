@@ -5,11 +5,12 @@ import matplotlib.pyplot as plt
 import os
 
 
-from model import unet
+from model.unet import Unet
 from sampling.sample_ddpm import sample_ddpm
 from noise.noise_generation import linear_beta_schedule, prepare_alphas
-from pre_vae.pre_vae import vae
-from config.config import device, model_id, output_dir
+# from pre_vae.pre_vae import vae
+# from config.config import device
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # === Data parser ===
 import argparse
@@ -26,14 +27,22 @@ args = parser.parse_args()
 checkpoint_no = args.checkpoint
 RUN_ID = args.run_id
 
+client = mlflow.tracking.MlflowClient(tracking_uri="http://127.0.1:5000")
+run = client.get_run(RUN_ID)
+
+output_dir_from_run = run.data.params.get("output_dir")
+if output_dir_from_run is None:
+    raise ValueError("Output directory not found in MLflow run parameters.")
+
+
 # === CONFIG ===
-mlflow.set_tracking_uri("http://127.0.0.1:5000")  # Replace with your actual MLflow URI                   # <-- Replace with actual run ID
+# mlflow.set_tracking_uri("http://127.0.0.1:5000")  # Replace with your actual MLflow URI                   # <-- Replace with actual run ID
 CHECKPOINT_PATH_IN_MLFLOW = f"checkpoints/checkpoint_epoch_{checkpoint_no}.pth"  # Path inside MLflow artifacts
 
 # model_result_path = "pre_vae_final6/"
 DEVICE = device
 # DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-OUTPUT_DIR = f"{output_dir}/generated_output/"
+OUTPUT_DIR = f"{output_dir_from_run}/generated_output/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 GRID_IMAGE_PATH = os.path.join(OUTPUT_DIR, f"generated_imgs_for_checkpoint_{checkpoint_no}.png")
@@ -43,11 +52,12 @@ if args.source == "mlflow":
     print("Downloading checkpoint from MLflow...")
     local_checkpoint_path = mlflow.artifacts.download_artifacts(
         run_id=RUN_ID,
-        artifact_path=CHECKPOINT_PATH_IN_MLFLOW
+        artifact_path=CHECKPOINT_PATH_IN_MLFLOW,
+        dst_path="/tmp"
     )
     print(f"Downloaded checkpoint to: {local_checkpoint_path}")
 else:
-    local_checkpoint_path = f"{output_dir}checkpoints3/checkpoint_epoch_{checkpoint_no}.pth"
+    local_checkpoint_path = f"{output_dir_from_run}checkpoints3/checkpoint_epoch_{checkpoint_no}.pth"
     if not os.path.exists(local_checkpoint_path):
         raise FileNotFoundError(f"Local checkpoint not found at {local_checkpoint_path}")
     print(f"Loaded local checkpoint from: {local_checkpoint_path}")
@@ -55,7 +65,7 @@ else:
 
 # === LOAD MODEL ===
 print("Initializing model...")
-model = unet().to(DEVICE)
+model = Unet().to(DEVICE)
     
 checkpoint = torch.load(local_checkpoint_path, map_location=DEVICE)
 model.load_state_dict(checkpoint["model_state_dict"], strict=False)
