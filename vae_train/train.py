@@ -16,8 +16,8 @@ import mlflow.pytorch
 
 mlflow.set_tracking_uri("http://127.0.0.1:5000")
 mlflow.set_experiment("Custom_VAE_Training")
-# mlflow.start_run(run_name="vae_run")
-mlflow.start_run(run_id="a09e56492b9e4607a2490588db3b8f5c")
+mlflow.start_run(run_name="vae_run")
+# mlflow.start_run(run_id="")
 mlflow.log_params({
     "num_epochs": num_epochs,
     "learning_rate": learning_rate,

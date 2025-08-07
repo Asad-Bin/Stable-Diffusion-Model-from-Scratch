@@ -9,5 +9,5 @@ vae_train/saved_images/
 vae_train/test_images/
 vae_train/testing_outputs/
 vae_train/*.out
-venv/
+/venv/
 task1.code-workspace

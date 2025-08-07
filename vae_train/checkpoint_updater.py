@@ -1,7 +1,7 @@
 import os
 import shutil
 
-copy_target = 300
+copy_target = 500
 
 def copy_files(file1, file2, source_dir, target_dir):
     os.makedirs(target_dir, exist_ok=True)  # create target folder if it doesn't exist
@@ -20,7 +20,7 @@ def copy_files(file1, file2, source_dir, target_dir):
 # Example usage
 if __name__ == "__main__":
     source_folder = "./vae_train/checkpoints"
-    destination_folder = "./vae_custom/checkpoints"
+    destination_folder = "./vae_custom/checkpoints2"
     os.makedirs(destination_folder, exist_ok=True)
     file_name_1 = f"encoder_epoch_{copy_target}.pt"
     file_name_2 = f"decoder_epoch_{copy_target}.pt"

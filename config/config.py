@@ -45,7 +45,7 @@ output_channels = 4
 base_channels = 64
 time_embedding_dim = 128
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 CONFIG = {
     "image_size": image_size,
@@ -68,7 +68,7 @@ CONFIG = {
 
 
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 CONFIG["device"] = str(device)
 
 # ------------------- PRINT CONFIG ------------------- #
@@ -86,7 +86,7 @@ def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
     mlflow.set_experiment("asad - custom_vae + unet")
     if old_run:
-        mlflow.start_run(run_id='a4ade43053f94ec49aed45d922be215f')
+        mlflow.start_run(run_id='28b9ab63d964491e89ebf7242f948793')
     elif not is_ml_flow_off:
         for k, v in cfg.items():
             mlflow.log_param(k, v)
@@ -109,7 +109,7 @@ def write_config_readme(cfg, output_dir):
 is_ml_flow_off = False
 old_run = True
 old_run_checkpoint_no = 200
-old_checkpoint_dir = "/home/asad/task1/output/output_20250806_103432/checkpoints/"
+old_checkpoint_dir = "/home/asad/task1/output/output_20250806_190804/checkpoints/"
 
 log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
 log_config_local(CONFIG, CONFIG["output_dir"])
@@ -121,11 +121,11 @@ write_config_readme(CONFIG, CONFIG["output_dir"])
 from vae_custom.custom_vae_wrap import load_custom_vae
 
 vae = load_custom_vae(
-    encoder_ckpt_path="./vae_custom/checkpoints/encoder.pt",
-    decoder_ckpt_path="./vae_custom/checkpoints/decoder.pt",
+    encoder_ckpt_path="./vae_custom/checkpoints2/encoder.pt",
+    decoder_ckpt_path="./vae_custom/checkpoints2/decoder.pt",
     device=device
 )
 
-latent_shift = -0.09661865234375
-latent_magnitude = 1.0380859375
+latent_shift = 0.01165771484375
+latent_magnitude = 1.0478515625
 scaling_factor = 3.0/8.5
