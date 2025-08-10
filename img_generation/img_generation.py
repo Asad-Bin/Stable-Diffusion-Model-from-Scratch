@@ -8,6 +8,7 @@ import os
 from model.unet import Unet
 from sampling.sample_ddpm import sample_ddpm
 from noise.noise_generation import linear_beta_schedule, prepare_alphas
+from config.config import vae, latent_shift, latent_magnitude
 # from pre_vae.pre_vae import vae
 # from config.config import device
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -45,7 +46,15 @@ DEVICE = device
 OUTPUT_DIR = f"{output_dir_from_run}/generated_output/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-GRID_IMAGE_PATH = os.path.join(OUTPUT_DIR, f"generated_imgs_for_checkpoint_{checkpoint_no}.png")
+# GRID_IMAGE_PATH = os.path.join(OUTPUT_DIR, f"generated_imgs_for_checkpoint_{checkpoint_no}.png")
+
+import datetime
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+GRID_IMAGE_PATH = os.path.join(
+    OUTPUT_DIR,
+    f"generated_imgs_checkpoint_{checkpoint_no}_{timestamp}.png"
+)
+
 
 # === DOWNLOAD CHECKPOINT FROM MLFLOW ===
 if args.source == "mlflow":
@@ -57,7 +66,7 @@ if args.source == "mlflow":
     )
     print(f"Downloaded checkpoint to: {local_checkpoint_path}")
 else:
-    local_checkpoint_path = f"{output_dir_from_run}checkpoints3/checkpoint_epoch_{checkpoint_no}.pth"
+    local_checkpoint_path = f"{output_dir_from_run}checkpoints/checkpoint_epoch_{checkpoint_no}.pth"
     if not os.path.exists(local_checkpoint_path):
         raise FileNotFoundError(f"Local checkpoint not found at {local_checkpoint_path}")
     print(f"Loaded local checkpoint from: {local_checkpoint_path}")

@@ -23,7 +23,7 @@ num_epochs = 3000
 timesteps = 1000
 learning_rate = 0.0001
 save_image_every = 5
-checkpoint_interval = 200
+checkpoint_interval = 5
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 os.makedirs(checkpoint_dir, exist_ok=True)
@@ -107,8 +107,8 @@ def write_config_readme(cfg, output_dir):
 
 # ------------------- EXECUTE LOGGING ------------------- #
 is_ml_flow_off = False
-old_run = True
-old_run_checkpoint_no = 200
+old_run = False
+old_run_checkpoint_no = 100
 old_checkpoint_dir = "/home/asad/task1/output/output_20250806_190804/checkpoints/"
 
 log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
@@ -121,11 +121,13 @@ write_config_readme(CONFIG, CONFIG["output_dir"])
 from vae_custom.custom_vae_wrap import load_custom_vae
 
 vae = load_custom_vae(
-    encoder_ckpt_path="./vae_custom/checkpoints2/encoder.pt",
-    decoder_ckpt_path="./vae_custom/checkpoints2/decoder.pt",
+    encoder_ckpt_path="./vae_custom/checkpoints2/encoder1.pt",
+    decoder_ckpt_path="./vae_custom/checkpoints2/decoder1.pt",
     device=device
 )
 
-latent_shift = 0.01165771484375
-latent_magnitude = 1.0478515625
+# latent_shift = 0.01165771484375
+# latent_magnitude = 1.0478515625
+latent_shift = -0.06365966796875
+latent_magnitude = 1.0634765625
 scaling_factor = 3.0/8.5

@@ -1,7 +1,7 @@
 import os
 import shutil
 
-copy_target = 500
+copy_target = 1000
 
 def copy_files(file1, file2, source_dir, target_dir):
     os.makedirs(target_dir, exist_ok=True)  # create target folder if it doesn't exist
@@ -9,8 +9,8 @@ def copy_files(file1, file2, source_dir, target_dir):
     src_file1 = os.path.join(source_dir, file1)
     src_file2 = os.path.join(source_dir, file2)
 
-    dst_file1 = os.path.join(target_dir, "encoder.pt")
-    dst_file2 = os.path.join(target_dir, "decoder.pt")
+    dst_file1 = os.path.join(target_dir, "encoder1.pt")
+    dst_file2 = os.path.join(target_dir, "decoder1.pt")
 
     shutil.copy2(src_file1, dst_file1)
     shutil.copy2(src_file2, dst_file2)

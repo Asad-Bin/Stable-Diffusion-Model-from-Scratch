@@ -90,7 +90,7 @@ def LoadData():
 
     dataset = HuggingFaceImageDataset(hf_data, transform=transform)
 
-    latent_cache_dir = os.path.join(dataset_dir, "cached_latents3")
+    latent_cache_dir = os.path.join(dataset_dir, "cached_latents4")
     if not os.path.exists(latent_cache_dir) or len(os.listdir(latent_cache_dir)) < len(dataset):
         print("🔄 Caching latents...")
         cache_latents_to_disk(dataset, save_dir=latent_cache_dir)
