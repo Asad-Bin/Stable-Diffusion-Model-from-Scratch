@@ -18,11 +18,17 @@ from sampling.sample_ddpm import sample_ddpm
 from utils.gradient_descent import plot_and_log_grad_norms
 from main import old_run
 from main.old_run import old_run_data
+from dataset.clip import clip_tokenizer, clip_text_model
 
 # from pre_vae.pre_vae import *
 from utils.debug import *
 # ...existing code...
 
+def get_clip_text_embedding_batch(prompts, tokenizer, text_model, device):
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+    with torch.no_grad():
+        text_features = text_model(**inputs).last_hidden_state.mean(dim=1)
+    return text_features  # shape: (batch_size, embedding_dim)
 
 # Training the model - train loop
 def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, save_interval=save_image_every):
@@ -48,9 +54,17 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
         grad_sums = {}
         grad_counts = {}
 
-        for i, imgs in enumerate(dataloader):
+        for i, (imgs, prompts) in enumerate(dataloader):
 
             optimizer.zero_grad(set_to_none=True)
+
+            imgs = imgs.to(device)
+
+            text_embedding = []
+            for prompt in prompts:
+                text_embedding = get_clip_text_embedding_batch(prompts, clip_tokenizer, clip_text_model, device)
+                text_embedding.append(text_embedding)
+            text_embedding = torch.stack(text_embedding, dim=0).to(device)
 
             b_size = imgs.size(0)
 
@@ -84,7 +98,7 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
             if is_ml_flow_off == False: 
                 for name, param in model.named_parameters():
-                    if param.grad is not None and "weight" in name:
+                    if param.grad is not None and "weight" and "conv1" in name:
                         first_layers = [
                             "enc1", "enc2", "enc3",
                             "base",

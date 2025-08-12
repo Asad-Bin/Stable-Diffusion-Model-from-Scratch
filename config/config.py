@@ -23,7 +23,7 @@ num_epochs = 3000
 timesteps = 1000
 learning_rate = 0.0001
 save_image_every = 5
-checkpoint_interval = 5
+checkpoint_interval = 200
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 os.makedirs(checkpoint_dir, exist_ok=True)
@@ -86,7 +86,7 @@ def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
     mlflow.set_experiment("asad - custom_vae + unet")
     if old_run:
-        mlflow.start_run(run_id='28b9ab63d964491e89ebf7242f948793')
+        mlflow.start_run(run_id='3bb016f503a94971b24e00910655db52')
     elif not is_ml_flow_off:
         for k, v in cfg.items():
             mlflow.log_param(k, v)
@@ -108,8 +108,8 @@ def write_config_readme(cfg, output_dir):
 # ------------------- EXECUTE LOGGING ------------------- #
 is_ml_flow_off = False
 old_run = False
-old_run_checkpoint_no = 100
-old_checkpoint_dir = "/home/asad/task1/output/output_20250806_190804/checkpoints/"
+old_run_checkpoint_no = 3000
+old_checkpoint_dir = "/home/asad/task1/output/output_20250807_185921/checkpoints"
 
 log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
 log_config_local(CONFIG, CONFIG["output_dir"])
@@ -130,4 +130,4 @@ vae = load_custom_vae(
 # latent_magnitude = 1.0478515625
 latent_shift = -0.06365966796875
 latent_magnitude = 1.0634765625
-scaling_factor = 3.0/8.5
+# scaling_factor = 3.0/8.5

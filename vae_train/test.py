@@ -27,7 +27,7 @@ def get_beta(epoch, max_beta=1e-4, warmup_epochs=10):
     return max_beta * min(1.0, epoch / warmup_epochs)
 
 
-chkpnt_epoch = 800  # Change this to the epoch you want to evaluate
+chkpnt_epoch = 1000  # Change this to the epoch you want to evaluate
 def evaluate_vae(model_ckpt_dir):
     # Load model
     encoder = Encoder().to(device)

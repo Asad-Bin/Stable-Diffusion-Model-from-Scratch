@@ -65,15 +65,15 @@ class DownBlock(nn.Module):
         return x, x_pooled
 
 class UpBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, use_attn=False, num_groups=8):
+    def __init__(self, in_channels, skip_channels, out_channels, time_emb_dim=None, use_attn=False, num_groups=8):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
-        self.conv = ConvBlock(skip_channels + out_channels, out_channels, time_emb_dim=None, num_groups=num_groups)
+        self.conv = ConvBlock(skip_channels + out_channels, out_channels, time_emb_dim=time_emb_dim, num_groups=num_groups)
         self.attn = AttentionBlock(out_channels) if use_attn else nn.Identity()
 
-    def forward(self, x, skip):
+    def forward(self, x, skip, t_emb=None):
         x = self.up(x)
         x = torch.cat([x, skip], dim=1)
-        x = self.conv(x)
+        x = self.conv(x, t_emb)
         x = self.attn(x)
         return x
