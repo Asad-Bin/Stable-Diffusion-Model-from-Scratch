@@ -3,33 +3,17 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from datasets import load_dataset
-import random
-import json
 
 from config.config import *
 from utils.debug import *
-# from pre_vae.pre_vae import vae
+# from pre_vae.pre_vae import vae  # make sure your VAE is available as in your setup
 
-# --------------------------------------------------
-# Import CLIP with multiple fallback options
-# --------------------------------------------------
+# ==================================================
+# CLIP text encoder with multiple fallbacks (unchanged)
+# ==================================================
 def setup_text_encoder():
     """Setup text encoder with multiple fallback options"""
     global text_encoder, tokenizer, encode_method
-    
-    # Option 1: Try original CLIP
-    try:
-        import clip
-        if hasattr(clip, 'load'):
-            model, preprocess = clip.load("ViT-B/32", device=device)
-            model.eval()
-            text_encoder = model
-            tokenizer = clip.tokenize
-            encode_method = 'original'
-            print("✅ Using original CLIP")
-            return
-    except Exception as e:
-        print(f"Original CLIP failed: {e}")
     
     # Option 2: Try transformers CLIP
     try:
@@ -44,179 +28,165 @@ def setup_text_encoder():
     except Exception as e:
         print(f"Transformers CLIP failed: {e}")
     
-    # Option 3: Try sentence transformers as last resort
-    try:
-        from sentence_transformers import SentenceTransformer
-        text_encoder = SentenceTransformer('clip-ViT-B-32').to(device)
-        tokenizer = None
-        encode_method = 'sentence_transformers'
-        print("✅ Using sentence-transformers CLIP")
-        return
-    except Exception as e:
-        print(f"Sentence transformers failed: {e}")
-    
     raise ImportError("❌ Could not load any text encoder. Please install one of: clip, transformers, or sentence-transformers")
 
 # Initialize text encoder
 setup_text_encoder()
 
-# --------------------------------------------------
-# Butterfly Prompt Generation Functions
-# --------------------------------------------------
-def generate_detailed_butterfly_prompt(idx=None):
-    """Generate detailed, varied butterfly prompts"""
-    
-    # Base butterfly types
-    butterfly_types = [
-        "Monarch butterfly", "Swallowtail butterfly", "Admiral butterfly", 
-        "Skipper butterfly", "Fritillary butterfly", "Blue butterfly",
-        "Copper butterfly", "Hairstreak butterfly", "White butterfly",
-        "Sulphur butterfly", "Longwing butterfly", "Metalmark butterfly"
-    ]
-    
-    # Colors and patterns
-    colors = [
-        "vibrant orange", "deep blue", "bright yellow", "pristine white",
-        "rich black", "emerald green", "royal purple", "copper red",
-        "silvery gray", "golden yellow", "coral pink", "turquoise blue"
-    ]
-    
-    patterns = [
-        "with intricate spotted wings", "with delicate striped patterns",
-        "with symmetrical wing markings", "with iridescent wing scales",
-        "with bold geometric patterns", "with subtle mottled designs",
-        "with eye-spot patterns", "with metallic wing borders",
-        "with transparent wing sections", "with gradient color transitions"
-    ]
-    
-    poses = [
-        "perched on a flower", "with wings spread wide", "in a graceful pose",
-        "resting on a leaf", "with wings partially folded", "in profile view",
-        "showing detailed wing structure", "captured from above", "in natural position",
-        "displaying wing patterns clearly"
-    ]
-    
-    settings = [
-        "against a neutral background", "in natural lighting",
-        "showing fine wing details", "in museum specimen style",
-        "with scientific precision", "in high detail photography",
-        "showcasing natural colors", "in documentary style"
-    ]
-    
-    descriptors = [
-        "beautiful", "delicate", "graceful", "elegant", "stunning",
-        "magnificent", "pristine", "detailed", "colorful", "exquisite"
-    ]
-    
-    # Create varied prompt templates
-    templates = [
-        "{descriptor} {butterfly_type} {pattern} {pose} {setting}",
-        "{color} {butterfly_type} {pattern} {pose}",
-        "{descriptor} {butterfly_type} {pose} {setting}",
-        "{butterfly_type} {pattern} {color} coloring {pose}",
-        "{descriptor} {color} {butterfly_type} {setting}",
-        "{butterfly_type} specimen {pattern} {pose} {setting}"
-    ]
-    
-    # Select random elements
-    template = random.choice(templates)
-    
-    prompt = template.format(
-        descriptor=random.choice(descriptors),
-        butterfly_type=random.choice(butterfly_types),
-        color=random.choice(colors),
-        pattern=random.choice(patterns),
-        pose=random.choice(poses),
-        setting=random.choice(settings)
+# ==================================================
+# Qwen2-VL (QueenVL) setup with robust fallbacks
+# ==================================================
+qvl_processor = None
+qvl_model = None
+
+def setup_queenvl():
+    """
+    Load Qwen2-VL-2B-Instruct with broad compatibility across transformers versions.
+    We try (in order):
+      1) Qwen2VLForConditionalGeneration (native class)
+      2) AutoModelForVision2Seq with trust_remote_code=True
+      3) AutoModelForCausalLM with trust_remote_code=True (older repos sometimes expose this)
+    """
+    global qvl_processor, qvl_model
+    from transformers import AutoProcessor
+    qvl_name = "Qwen/Qwen2-VL-2B-Instruct"
+    print("🔄 Loading Qwen2-VL processor...")
+    qvl_processor = AutoProcessor.from_pretrained(qvl_name, trust_remote_code=True)
+    last_err = None
+
+    # Try native class
+    try:
+        from transformers import Qwen2VLForConditionalGeneration
+        print("🔄 Trying Qwen2VLForConditionalGeneration...")
+        qvl_model = Qwen2VLForConditionalGeneration.from_pretrained(
+            qvl_name,
+            torch_dtype=torch.float16,
+            device_map=None,
+            # trust_remote_code=True,
+        ).to(device)
+        print("✅ Loaded with Qwen2VLForConditionalGeneration")
+        return
+    except Exception as e:
+        last_err = e
+        print(f"Qwen2VLForConditionalGeneration failed: {e}")
+
+def generate_prompt_with_queenvl(image_pil):
+    global qvl_processor, qvl_model
+    if qvl_processor is None or qvl_model is None:
+        setup_queenvl()
+
+    query = (
+        "Describe this butterfly briefly but precisely: species traits if evident, "
+        "dominant colors, wing pattern (spots/stripes/borders), and notable features."
     )
-    
-    # Clean up any double spaces
-    prompt = ' '.join(prompt.split())
-    
-    return prompt
 
-def generate_scientific_butterfly_prompt(idx=None):
-    """Generate scientific/specimen style prompts"""
-    
-    families = [
-        "Nymphalidae", "Papilionidae", "Pieridae", "Lycaenidae",
-        "Hesperiidae", "Riodinidae", "Danaidae", "Satyridae"
+    messages = [
+        {"role": "user", "content": [
+            {"type": "image"},
+            {"type": "text", "text": query}
+        ]}
     ]
-    
-    features = [
-        "wingspan measurement visible", "antenna structure detailed",
-        "wing venation patterns clear", "body segmentation visible",
-        "proboscis coiled", "compound eyes detailed",
-        "leg structure visible", "wing scales magnified"
-    ]
-    
-    specimen_terms = [
-        "museum specimen", "scientific collection", "taxonomic reference",
-        "research specimen", "field guide illustration", "entomological study",
-        "species documentation", "morphological study"
-    ]
-    
-    template = random.choice([
-        f"Lepidoptera specimen from {random.choice(families)} family with {random.choice(features)}",
-        f"Butterfly {random.choice(specimen_terms)} showing {random.choice(features)}",
-        f"Scientific illustration of butterfly with {random.choice(features)}",
-        f"{random.choice(families)} butterfly specimen for {random.choice(specimen_terms)}"
-    ])
-    
-    return template
 
-def generate_artistic_butterfly_prompt(idx=None):
-    """Generate artistic/aesthetic prompts"""
-    
-    artistic_styles = [
-        "watercolor painting style", "botanical illustration",
-        "nature photography", "macro photography",
-        "vintage naturalist drawing", "field guide illustration",
-        "scientific diagram", "detailed sketch"
-    ]
-    
-    aesthetics = [
-        "soft natural lighting", "vibrant color palette",
-        "high contrast details", "delicate textures",
-        "fine art composition", "minimalist background",
-        "studio lighting", "dramatic shadows"
-    ]
-    
-    template = f"Butterfly rendered in {random.choice(artistic_styles)} with {random.choice(aesthetics)}"
-    return template
+    text_prompt = qvl_processor.apply_chat_template(messages, add_generation_prompt=True)
 
-# --------------------------------------------------
-# Enhanced Dataset with Generated Prompts
-# --------------------------------------------------
+
+    # Processor produces either pixel_values or already flattened features
+    inputs = qvl_processor(images=image_pil, text=text_prompt, return_tensors="pt")
+    for k, v in inputs.items():
+        inputs[k] = v.to(device)
+
+    # pixel_values = inputs.pop("pixel_values", None)
+
+    # If pixel_values is missing or flattened, let the model handle it
+    # kwargs = {"input_ids": inputs["input_ids"]}
+    # if pixel_values is not None:
+    #     kwargs["pixel_values"] = pixel_values
+
+        # Attempt to provide image_grid_thw only if pixel_values is 4D
+        # if pixel_values.ndim == 4:
+        #     _, _, H, W = pixel_values.shape
+        #     patch_size = 16
+        #     grid_h = H // patch_size
+        #     grid_w = W // patch_size
+        #     kwargs["image_grid_thw"] = (1, grid_h, grid_w)
+
+    with torch.no_grad():
+        output = qvl_model.generate(**inputs, max_new_tokens=80)
+
+    description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
+    return description.strip()
+ 
+
+
+# def generate_prompt_with_queenvl(image_pil):
+    # """Generate descriptive prompt from an image using Qwen2-VL."""
+    # global qvl_processor, qvl_model
+    # if qvl_processor is None or qvl_model is None:
+    #     setup_queenvl()
+
+    # # Keep it short, visual-detail-focused for training
+    # query = (
+    #     "Describe this butterfly briefly but precisely: species traits if evident, "
+    #     "dominant colors, wing pattern (spots/stripes/borders), and notable features."
+    # )
+
+    # # Most Qwen2-VL versions accept images + text via AutoProcessor
+    # inputs = qvl_processor(
+    #     images=image_pil,
+    #     text=query,
+    #     return_tensors="pt"
+    # )
+
+    # # inputs = qvl_processor(images=image_pil, text=query, return_tensors="pt")
+    # # Move tensors to device individually
+    # for k, v in inputs.items():
+    #     inputs[k] = v.to(device)
+
+    # with torch.no_grad():
+    #     output = qvl_model.generate(**inputs, max_new_tokens=80)
+
+    # # description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
+
+    # # Some processors return pairs like "<image>\n..."; decoding strips specials
+    # description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
+    # return description.strip()
+
+# ==================================================
+# Dataset that ONLY uses Qwen2-VL to create prompts
+# (random prompt generators removed)
+# ==================================================
 class ButterflyDatasetWithPrompts(Dataset):
-    def __init__(self, hf_dataset, transform=None, prompt_style="detailed", save_prompts_file=None):
+    def __init__(self, hf_dataset, transform=None, save_prompts_file=None, regenerate_prompts=True):
         self.dataset = hf_dataset
         self.transform = transform
-        self.prompt_style = prompt_style
         self.generated_prompts = []
-        
-        print(f"🦋 Generating {prompt_style} prompts for {len(hf_dataset)} butterfly images...")
-        
-        # Pre-generate all prompts for consistency
-        for idx in range(len(hf_dataset)):
-            if prompt_style == "detailed":
-                prompt = generate_detailed_butterfly_prompt(idx)
-            elif prompt_style == "scientific":
-                prompt = generate_scientific_butterfly_prompt(idx)
-            elif prompt_style == "artistic":
-                prompt = generate_artistic_butterfly_prompt(idx)
-            else:
-                prompt = "a beautiful butterfly specimen"
-            
-            self.generated_prompts.append(prompt)
-        
-        # Save prompts to file for reference
-        if save_prompts_file:
-            with open(save_prompts_file, 'w', encoding='utf-8') as f:
-                for i, prompt in enumerate(self.generated_prompts):
-                    f.write(f"[{i}] {prompt}\n")
-            print(f"✅ Saved all generated prompts to {save_prompts_file}")
-        
+        self.save_prompts_file = save_prompts_file
+
+        if regenerate_prompts or not (save_prompts_file and os.path.exists(save_prompts_file)):
+            print(f"🦋 Generating QueenVL prompts for {len(hf_dataset)} butterfly images...")
+            for idx in range(len(hf_dataset)):
+                image_pil = hf_dataset[idx]['image'].convert('RGB')
+                prompt = generate_prompt_with_queenvl(image_pil)
+                self.generated_prompts.append(prompt)
+
+                if((idx+1) % 10 == 0):
+                    print(f"✅ Generated {idx + 1}/{len(hf_dataset)} prompts: '{prompt[:50]}...'")
+
+            if save_prompts_file:
+                os.makedirs(os.path.dirname(save_prompts_file), exist_ok=True)
+                with open(save_prompts_file, 'w', encoding='utf-8') as f:
+                    # Maintain your original line-per-prompt format for compatibility
+                    for i, p in enumerate(self.generated_prompts):
+                        f.write(f"[{i}] {p}\n")
+                print(f"✅ Saved prompts to {save_prompts_file}")
+        else:
+            print(f"📂 Loading cached prompts from {save_prompts_file}")
+            with open(save_prompts_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            # Parse the "[i] " prefix to get the prompt text
+            self.generated_prompts = [line.split("]", 1)[1].strip() if "]" in line else line.strip()
+                                      for line in lines]
+
         # Show sample prompts
         print("\n📝 Sample generated prompts:")
         for i in range(min(10, len(self.generated_prompts))):
@@ -228,14 +198,13 @@ class ButterflyDatasetWithPrompts(Dataset):
     def __getitem__(self, idx):
         image = self.dataset[idx]['image'].convert('RGB')
         prompt = self.generated_prompts[idx]
-        
         if self.transform:
             image = self.transform(image)
         return image, prompt
 
-# --------------------------------------------------
-# Function to encode text with different methods
-# --------------------------------------------------
+# ==================================================
+# Encode text with your CLIP stack (unchanged)
+# ==================================================
 def encode_text_with_clip(text):
     """Encode text using the available method"""
     with torch.no_grad():
@@ -258,9 +227,9 @@ def encode_text_with_clip(text):
         else:
             raise ValueError(f"Unknown encode method: {encode_method}")
 
-# --------------------------------------------------
-# Save VAE-encoded latents and CLIP text embeddings to disk
-# --------------------------------------------------
+# ==================================================
+# Cache VAE latents + CLIP text embeddings (kept your logic)
+# ==================================================
 def cache_latents_to_disk(dataset, save_dir="cached_latents"):
     os.makedirs(save_dir, exist_ok=True)
     vae.eval().to(device).half()
@@ -294,11 +263,12 @@ def cache_latents_to_disk(dataset, save_dir="cached_latents"):
         if idx % 100 == 0:
             print(f"✅ Cached {idx}/{len(dataset)}: '{prompt[:50]}...'")
 
-    # Save prompts for reference
+    # Save prompts for reference (line-per-prompt to match your existing reader)
     with open(os.path.join(save_dir, "prompts.txt"), "w", encoding='utf-8') as f:
         for prompt in prompts:
             f.write(prompt + "\n")
     
+    # Aggregate for quick sanity stats
     all_latents = torch.concat(all_latents, dim=0)
     all_text_embeddings = torch.stack(all_text_embeddings, dim=0)
     
@@ -306,9 +276,9 @@ def cache_latents_to_disk(dataset, save_dir="cached_latents"):
     print(f"Text embeddings shape: {all_text_embeddings.shape}, mean: {all_text_embeddings.mean()}")
     print(f"✅ Cached {len(dataset)} latent files and text embeddings to {save_dir}")
 
-# --------------------------------------------------
-# Dataset for cached latents with text embeddings
-# --------------------------------------------------
+# ==================================================
+# CachedLatentDataset (unchanged interface)
+# ==================================================
 class CachedLatentDataset(Dataset):
     def __init__(self, latent_dir):
         self.latent_dir = latent_dir
@@ -344,16 +314,13 @@ class CachedLatentDataset(Dataset):
         
         return latent, text_embedding, prompt
 
-# --------------------------------------------------
-# Enhanced LoadData with Generated Prompts
-# --------------------------------------------------
-def LoadData(prompt_style="detailed", regenerate_prompts=True):
+# ==================================================
+# LoadData now uses QueenVL (no random styles)
+# ==================================================
+def LoadData(prompt_style="queenvl", regenerate_prompts=True):
     """
-    Load butterfly dataset with generated prompts
-    
-    Args:
-        prompt_style: "detailed", "scientific", or "artistic"
-        regenerate_prompts: If True, regenerate prompts; if False, try to load existing
+    Load butterfly dataset with Qwen2-VL prompts (only).
+    Args kept for compatibility with your code.
     """
     hf_data = load_dataset("huggan/smithsonian_butterflies_subset", split="train")
     print(f"🦋 Loaded Smithsonian butterflies dataset with {len(hf_data)} images")
@@ -364,22 +331,27 @@ def LoadData(prompt_style="detailed", regenerate_prompts=True):
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
-    # Create prompts file path
-    prompts_file = os.path.join(dataset_dir, f"generated_prompts_{prompt_style}.txt")
+    # Prompts file (keep your original naming but force 'queenvl')
+    prompts_file = os.path.join(dataset_dir, f"generated_prompts_queenvl.txt")
     
-    # Create dataset with generated prompts
+    # Create dataset with Qwen2-VL prompts
     dataset = ButterflyDatasetWithPrompts(
         hf_data, 
         transform=transform, 
-        prompt_style=prompt_style,
-        save_prompts_file=prompts_file
+        save_prompts_file=prompts_file,
+        regenerate_prompts=regenerate_prompts
     )
 
-    latent_cache_dir = os.path.join(dataset_dir, f"cached_latents_{prompt_style}")
+    latent_cache_dir = os.path.join(dataset_dir, f"cached_latents_queenvl")
     
     # Cache latents and embeddings
     if regenerate_prompts or not os.path.exists(latent_cache_dir):
-        print(f"🔄 Caching latents with {prompt_style} prompts...")
+        print(f"🔄 Caching latents + text embeddings with Qwen2-VL prompts...")
+        os.makedirs(latent_cache_dir, exist_ok=True)
+        # Save prompts alongside cache for CachedLatentDataset
+        with open(os.path.join(latent_cache_dir, "prompts.txt"), "w", encoding='utf-8') as f:
+            for _, prompt in dataset:
+                f.write(prompt + "\n")
         cache_latents_to_disk(dataset, save_dir=latent_cache_dir)
     else:
         print(f"✅ Using existing cached latents from {latent_cache_dir}")
@@ -388,7 +360,7 @@ def LoadData(prompt_style="detailed", regenerate_prompts=True):
     dataloader = DataLoader(cached_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     # Test the dataloader
-    print("\n🧪 Testing dataloader with generated prompts:")
+    print("\n🧪 Testing dataloader with Qwen2-VL prompts:")
     for batch_idx, (latents, text_embeddings, prompts) in enumerate(dataloader):
         print(f"Batch {batch_idx}:")
         print(f"  Latents shape: {latents.shape}")
@@ -398,33 +370,21 @@ def LoadData(prompt_style="detailed", regenerate_prompts=True):
             print(f"    [{i}] {prompt}")
         break  # Just show first batch
     
-    print(f"✅ Loaded {len(cached_dataset)} butterfly samples with {prompt_style} prompts")
+    print(f"✅ Loaded {len(cached_dataset)} butterfly samples with Qwen2-VL prompts")
     return dataloader
 
-# --------------------------------------------------
-# Function to test different prompt styles
-# --------------------------------------------------
-def test_all_prompt_styles():
-    """Test all prompt generation styles"""
-    print("🧪 Testing all prompt styles:\n")
-    
-    styles = ["detailed", "scientific", "artistic"]
-    for style in styles:
-        print(f"=== {style.upper()} PROMPTS ===")
-        for i in range(5):
-            if style == "detailed":
-                prompt = generate_detailed_butterfly_prompt()
-            elif style == "scientific":
-                prompt = generate_scientific_butterfly_prompt()
-            elif style == "artistic":
-                prompt = generate_artistic_butterfly_prompt()
-            print(f"  {prompt}")
-        print()
-
-# Final call - choose your preferred prompt style
+# ==================================================
+# Main
+# ==================================================
+dataloader = None
 if __name__ == "__main__":
-    # Test prompt styles first
-    test_all_prompt_styles()
-    
-    # Load data with your preferred prompt style
-    dataloader = LoadData(prompt_style="detailed", regenerate_prompts=True)
+    # Load data using QueenVL prompts
+    dataloader = LoadData(prompt_style="queenvl", regenerate_prompts=True)
+
+    for batch in dataloader:
+        print(len(batch), type(batch))
+        print(type(batch[0]), batch[0].shape)  # Latents
+        print(type(batch[1]), batch[1].shape)  # Text embeddings
+        # prompts is a tuple/list of strings
+        print(type(batch[2]), len(batch[2]))   # Prompts
+        break

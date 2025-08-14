@@ -30,6 +30,53 @@ def get_clip_text_embedding_batch(prompts, tokenizer, text_model, device):
         text_features = text_model(**inputs).last_hidden_state.mean(dim=1)
     return text_features  # shape: (batch_size, embedding_dim)
 
+def print_image(epoch):
+    with torch.no_grad():
+        model.eval()
+        num_samples = 2
+        sample_shape = (num_samples, 4, image_size//8, image_size//8)
+        
+        #prompt 
+        # num_samples = 2
+        random_prompts = ["a beautiful butterfly with colorful wings"] * num_samples
+        text_embedding = get_clip_text_embedding_batch(random_prompts, clip_tokenizer, clip_text_model, device)
+
+        # random_prompts = ["a beautiful butterfly with colorful wings"]
+        # text_embedding = get_clip_text_embedding_batch(random_prompts, clip_tokenizer, clip_text_model, device)
+
+        sampled = sample_ddpm(
+            model, 
+            betas, 
+            shape=sample_shape, 
+            device=device, 
+            timesteps=timesteps, 
+            vae=vae,
+            text_embeddings=text_embedding
+        )
+
+        sampled = (sampled + 1) / 2.0
+        sampled = torch.clamp(sampled, 0.0, 1.0)
+
+        image_tensor = make_grid(sampled, nrow=2)
+        np_image = image_tensor.permute(1, 2, 0).cpu().numpy()
+
+        mlflow.log_image(image=np_image, artifact_file=f"generated_image_epoch_{epoch+1:04d}.png")
+
+        plt.figure(figsize=(12, 6))
+        plt.imshow(np_image)
+        plt.title(f"Epoch {epoch+1} Sample")
+        plt.axis('off')
+        plt.show()
+
+
+        save_img_path = os.path.join(output_dir, "training_outputs", f"epoch_{epoch+1:04d}_samples.png")
+        os.makedirs(os.path.dirname(save_img_path), exist_ok=True)
+        plt.figure(figsize=(12, 6))
+        plt.imsave(save_img_path, np_image)
+        plt.close()
+        print(f"Saved sample to: {save_img_path}")
+    model.train()
+
 # Training the model - train loop
 def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, save_interval=save_image_every):
     model.train()
@@ -54,17 +101,21 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
         grad_sums = {}
         grad_counts = {}
 
-        for i, (imgs, prompts) in enumerate(dataloader):
+        for i, value in enumerate(dataloader):
+            imgs = value[0]
+            prompts = value[2]
 
             optimizer.zero_grad(set_to_none=True)
 
             imgs = imgs.to(device)
 
-            text_embedding = []
-            for prompt in prompts:
-                text_embedding = get_clip_text_embedding_batch(prompts, clip_tokenizer, clip_text_model, device)
-                text_embedding.append(text_embedding)
-            text_embedding = torch.stack(text_embedding, dim=0).to(device)
+            # text_embedding = []
+            # for prompt in prompts:
+            #     text_embedding = get_clip_text_embedding_batch(prompts, clip_tokenizer, clip_text_model, device)
+            #     text_embedding.append(text_embedding)
+            # text_embedding = torch.stack(text_embedding, dim=0).to(device)
+            text_embedding = get_clip_text_embedding_batch(prompts, clip_tokenizer, clip_text_model, device)
+
 
             b_size = imgs.size(0)
 
@@ -76,7 +127,7 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
             z_t = z_t.to(device)
             noise = noise.to(device)
             print_gpu_memory("before training starts.")
-            pred_noise = model(z_t, t)
+            pred_noise = model(z_t, t, text_emb = text_embedding)
 
             print_gpu_memory("After getback from trinaing loop")
 
@@ -98,7 +149,7 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
             if is_ml_flow_off == False: 
                 for name, param in model.named_parameters():
-                    if param.grad is not None and "weight" and "conv1" in name:
+                    if param.grad is not None and ("weight" in name) and ("conv1" in name):
                         first_layers = [
                             "enc1", "enc2", "enc3",
                             "base",
@@ -161,8 +212,9 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
                 'loss': avg_loss
             }, checkpoint_path)
 
-            mlflow.log_artifact(checkpoint_path, artifact_path="checkpoints")
-            print(f"✅ Logged checkpoint for epoch {epoch+1} to MLflow.")
+            if num_epochs-epoch <= 200:
+                mlflow.log_artifact(checkpoint_path, artifact_path="checkpoints")
+                print(f"✅ Logged checkpoint for epoch {epoch+1} to MLflow.")
 
 
             # 💡 Always define before using
@@ -179,34 +231,8 @@ def train_model(dataloader, model, betas, epochs=num_epochs, lr=learning_rate, s
 
 
         if epoch <= 200 or (epoch+1) % save_interval == 0:
-            with torch.no_grad():
-                model.eval()
-                num_samples = 2
-                sample_shape = (num_samples, 4, image_size//8, image_size//8)
-                sampled = sample_ddpm(model, betas, shape = sample_shape, device=device, vae=vae, timesteps=timesteps)
+            print_image(epoch)
 
-                sampled = (sampled + 1) / 2.0
-                sampled = torch.clamp(sampled, 0.0, 1.0)
-
-                image_tensor = make_grid(sampled, nrow=2)
-                np_image = image_tensor.permute(1, 2, 0).cpu().numpy()
-
-                mlflow.log_image(image=np_image, artifact_file=f"generated_image_epoch_{epoch+1:04d}.png")
-
-                plt.figure(figsize=(12, 6))
-                plt.imshow(np_image)
-                plt.title(f"Epoch {epoch+1} Sample")
-                plt.axis('off')
-                plt.show()
-
-
-                save_img_path = os.path.join(output_dir, "training_outputs", f"epoch_{epoch+1:04d}_samples.png")
-                os.makedirs(os.path.dirname(save_img_path), exist_ok=True)
-                plt.figure(figsize=(12, 6))
-                plt.imsave(save_img_path, np_image)
-                plt.close()
-                print(f"Saved sample to: {save_img_path}")
-            model.train()
     print("Diffusion training complete")
 
 if __name__ == '__main__':
@@ -216,7 +242,8 @@ if __name__ == '__main__':
         base_ch=64,
         time_emb_dim=128,
         time_steps=timesteps,
-        num_groups=8
+        num_groups=8,
+        text_emb_dim = 512
     ).to(device)
 
     print("Num params: ", sum(p.numel() for p in model.parameters()))
@@ -229,24 +256,24 @@ if __name__ == '__main__':
     # torch.save(model.state_dict(), model_save_path)
     # print("Saved diffusion model to:", model_save_path)
 
-    num_samples = 4
-    sample_shape = (num_samples, 4, image_size//8, image_size//8)
-    final_samples = sample_ddpm(model, betas, shape=sample_shape, device=device, timesteps=timesteps)
-    final_samples = (final_samples+1)/2.0
-    final_samples = torch.clamp(final_samples, 0.0, 1.0)
+    # num_samples = 4
+    # sample_shape = (num_samples, 4, image_size//8, image_size//8)
+    # final_samples = sample_ddpm(model, betas, shape=sample_shape, device=device, timesteps=timesteps)
+    # final_samples = (final_samples+1)/2.0
+    # final_samples = torch.clamp(final_samples, 0.0, 1.0)
 
-    grid = make_grid(final_samples, nrow=2)
-    np_grid = grid.permute(1, 2, 0).cpu().numpy()
+    # grid = make_grid(final_samples, nrow=2)
+    # np_grid = grid.permute(1, 2, 0).cpu().numpy()
 
-    plt.figure(figsize=(6, 6))
-    plt.imshow(np_grid, cmap='gray')
-    plt.title(f"final samples (Epoch {num_epochs})")
-    plt.axis('off')
-    plt.show()
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(np_grid, cmap='gray')
+    # plt.title(f"final samples (Epoch {num_epochs})")
+    # plt.axis('off')
+    # plt.show()
 
-    final_save_path = os.path.join(output_dir, "generated_output", "final_ddpm_samples.png")
-    os.makedirs(os.path.dirname(final_save_path), exist_ok=True)
-    mlflow.log_image(image=np_grid, artifact_file=f"final_ddpm_samples.png")
+    # final_save_path = os.path.join(output_dir, "generated_output", "final_ddpm_samples.png")
+    # os.makedirs(os.path.dirname(final_save_path), exist_ok=True)
+    # mlflow.log_image(image=np_grid, artifact_file=f"final_ddpm_samples.png")
 
-    plt.imsave(final_save_path, np_grid, cmap='gray')
-    print('saved final sample grid to: ', final_save_path)
+    # plt.imsave(final_save_path, np_grid, cmap='gray')
+    # print('saved final sample grid to: ', final_save_path)

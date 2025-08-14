@@ -23,29 +23,27 @@ num_epochs = 3000
 timesteps = 1000
 learning_rate = 0.0001
 save_image_every = 5
-checkpoint_interval = 200
+checkpoint_interval = 50
 
 checkpoint_dir = os.path.join(output_dir, "checkpoints")
 os.makedirs(checkpoint_dir, exist_ok=True)
-
-model_id = 1
 
 dataset_dir = "./dataset/huggingface_butterflies"
 os.makedirs(dataset_dir, exist_ok=True)
 
 note = (
-    "Used 3 blocks of encoder decoder\n"
+    "       Used 3 blocks of encoder decoder\n"
     "       Used 3 attention at enc3, bottleneck & dec3,\n"
     "       last conv layer of each block has 'Silu',\n"
     "       no scaling factor, but norm\n"
-    "       decoder time emb removed,\n"
+    "       vae trained at 1000 epoch.\n"
 )
 input_channels = 4
 output_channels = 4
 base_channels = 64
 time_embedding_dim = 128
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 CONFIG = {
     "image_size": image_size,
@@ -55,7 +53,6 @@ CONFIG = {
     "learning_rate": learning_rate,
     "save_image_every": save_image_every,
     "checkpoint_interval": checkpoint_interval,
-    "model_id": model_id,
     "output_dir": output_dir,
     "dataset_dir": dataset_dir,
     "note": note,
@@ -84,7 +81,7 @@ print_config(CONFIG)
 # ------------------- LOGGING ------------------- #
 def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
     mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    mlflow.set_experiment("asad - custom_vae + unet")
+    mlflow.set_experiment("asad - text_emb + cus_vae + unet")
     if old_run:
         mlflow.start_run(run_id='3bb016f503a94971b24e00910655db52')
     elif not is_ml_flow_off:
@@ -111,9 +108,10 @@ old_run = False
 old_run_checkpoint_no = 3000
 old_checkpoint_dir = "/home/asad/task1/output/output_20250807_185921/checkpoints"
 
-log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
-log_config_local(CONFIG, CONFIG["output_dir"])
-write_config_readme(CONFIG, CONFIG["output_dir"])
+if __name__ == "__main__":
+    log_config_mlflow(CONFIG, is_ml_flow_off, old_run)
+    log_config_local(CONFIG, CONFIG["output_dir"])
+    write_config_readme(CONFIG, CONFIG["output_dir"])
 
 
 # ------------------- VAE SETTINGS  ------------------- #
@@ -121,8 +119,8 @@ write_config_readme(CONFIG, CONFIG["output_dir"])
 from vae_custom.custom_vae_wrap import load_custom_vae
 
 vae = load_custom_vae(
-    encoder_ckpt_path="./vae_custom/checkpoints2/encoder1.pt",
-    decoder_ckpt_path="./vae_custom/checkpoints2/decoder1.pt",
+    encoder_ckpt_path="./vae_custom/checkpoints/encoder.pt",
+    decoder_ckpt_path="./vae_custom/checkpoints/decoder.pt",
     device=device
 )
 
