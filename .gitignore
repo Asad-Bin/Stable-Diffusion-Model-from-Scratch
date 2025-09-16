@@ -1,13 +1,53 @@
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
 */__pycache__/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+/venv/
+/env/
+/.venv/
+/.env/
+
+# Project specific data
 dataset/huggingface_butterflies/
+dataset/cached_latents/
+dataset/cache_log.txt
+
+# Sensitive configuration
+config/sensitive_config.py
+
+# Logs and outputs
+*.log
+*.out
+nohup.out
+vae_train/*.out
+
+# MLflow
 mlruns/
+
+# Model checkpoints and outputs
 output/output_*_*/checkpoints/
 output/output_*_*/training_outputs/
 vae_train/checkpoints/
 vae_train/saved_images/
 vae_train/test_images/
 vae_train/testing_outputs/
-vae_train/*.out
-/venv/
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
 task1.code-workspace
+
+# OS specific files
+.DS_Store
+Thumbs.db

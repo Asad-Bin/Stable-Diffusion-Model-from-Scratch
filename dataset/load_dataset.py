@@ -6,7 +6,8 @@ from datasets import load_dataset
 
 from config.config import *
 from utils.debug import *
-# from pre_vae.pre_vae import vae  # make sure your VAE is available as in your setup
+from pre_vae.pre_vae import vae 
+#  # make sure your VAE is available as in your setup
 
 # ==================================================
 # CLIP text encoder with multiple fallbacks (unchanged)
@@ -76,8 +77,7 @@ def generate_prompt_with_queenvl(image_pil):
         setup_queenvl()
 
     query = (
-        "Describe this butterfly briefly but precisely: species traits if evident, "
-        "dominant colors, wing pattern (spots/stripes/borders), and notable features."
+        "Describe this butterfly briefly but precisely: dominant colors, wing pattern (spots/stripes/borders), and notable features, within 20 words"
     )
 
     messages = [
@@ -95,61 +95,15 @@ def generate_prompt_with_queenvl(image_pil):
     for k, v in inputs.items():
         inputs[k] = v.to(device)
 
-    # pixel_values = inputs.pop("pixel_values", None)
-
-    # If pixel_values is missing or flattened, let the model handle it
-    # kwargs = {"input_ids": inputs["input_ids"]}
-    # if pixel_values is not None:
-    #     kwargs["pixel_values"] = pixel_values
-
-        # Attempt to provide image_grid_thw only if pixel_values is 4D
-        # if pixel_values.ndim == 4:
-        #     _, _, H, W = pixel_values.shape
-        #     patch_size = 16
-        #     grid_h = H // patch_size
-        #     grid_w = W // patch_size
-        #     kwargs["image_grid_thw"] = (1, grid_h, grid_w)
-
     with torch.no_grad():
-        output = qvl_model.generate(**inputs, max_new_tokens=80)
+        output = qvl_model.generate(**inputs, max_new_tokens=100)
 
     description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
+
+    tokens = tokenizer(description, truncation=True, max_length=77)["input_ids"]
+    description = tokenizer.decode(tokens, skip_special_tokens=True)
     return description.strip()
  
-
-
-# def generate_prompt_with_queenvl(image_pil):
-    # """Generate descriptive prompt from an image using Qwen2-VL."""
-    # global qvl_processor, qvl_model
-    # if qvl_processor is None or qvl_model is None:
-    #     setup_queenvl()
-
-    # # Keep it short, visual-detail-focused for training
-    # query = (
-    #     "Describe this butterfly briefly but precisely: species traits if evident, "
-    #     "dominant colors, wing pattern (spots/stripes/borders), and notable features."
-    # )
-
-    # # Most Qwen2-VL versions accept images + text via AutoProcessor
-    # inputs = qvl_processor(
-    #     images=image_pil,
-    #     text=query,
-    #     return_tensors="pt"
-    # )
-
-    # # inputs = qvl_processor(images=image_pil, text=query, return_tensors="pt")
-    # # Move tensors to device individually
-    # for k, v in inputs.items():
-    #     inputs[k] = v.to(device)
-
-    # with torch.no_grad():
-    #     output = qvl_model.generate(**inputs, max_new_tokens=80)
-
-    # # description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
-
-    # # Some processors return pairs like "<image>\n..."; decoding strips specials
-    # description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
-    # return description.strip()
 
 # ==================================================
 # Dataset that ONLY uses Qwen2-VL to create prompts
@@ -167,10 +121,10 @@ class ButterflyDatasetWithPrompts(Dataset):
             for idx in range(len(hf_dataset)):
                 image_pil = hf_dataset[idx]['image'].convert('RGB')
                 prompt = generate_prompt_with_queenvl(image_pil)
-                self.generated_prompts.append(prompt)
+                self.generated_prompts.append(prompt[202:])
 
                 if((idx+1) % 10 == 0):
-                    print(f"✅ Generated {idx + 1}/{len(hf_dataset)} prompts: '{prompt[:50]}...'")
+                    print(f"✅ Generated {idx + 1}/{len(hf_dataset)} prompts: '{prompt[202:252]}...'")
 
             if save_prompts_file:
                 os.makedirs(os.path.dirname(save_prompts_file), exist_ok=True)
@@ -206,6 +160,7 @@ class ButterflyDatasetWithPrompts(Dataset):
 # Encode text with your CLIP stack (unchanged)
 # ==================================================
 def encode_text_with_clip(text):
+    print(text)
     """Encode text using the available method"""
     with torch.no_grad():
         if encode_method == 'original':
@@ -245,36 +200,65 @@ def cache_latents_to_disk(dataset, save_dir="cached_latents"):
         # Process image
         image = image.to(device).half().unsqueeze(0)
         with torch.no_grad():
-            latents = vae.encode(image)
-            latents = (latents - latent_shift) / latent_magnitude
-            all_latents.append(latents)
-        
-        # Process text with CLIP
-        text_embedding = encode_text_with_clip(prompt)
-        all_text_embeddings.append(text_embedding)
-        
-        # Save latents and text embeddings separately
-        latent_save_path = os.path.join(save_dir, f"latent_{idx}.pt")
-        text_save_path = os.path.join(save_dir, f"text_emb_{idx}.pt")
-        
-        torch.save(latents.squeeze(0).cpu(), latent_save_path)
-        torch.save(text_embedding, text_save_path)
-        
-        if idx % 100 == 0:
-            print(f"✅ Cached {idx}/{len(dataset)}: '{prompt[:50]}...'")
+            encoded = vae.encode(image)
 
-    # Save prompts for reference (line-per-prompt to match your existing reader)
+            if hasattr(encoded, "latent_dist"):  # AutoencoderKL
+                latents = encoded.latent_dist.sample()
+            elif hasattr(encoded, "latents"):  # AutoencoderTinyOutput
+                latents = encoded.latents
+            elif hasattr(encoded, "sample"):  # If it's already a dist
+                latents = encoded.sample()
+            elif isinstance(encoded, torch.Tensor):
+                latents = encoded
+            else:
+                raise ValueError(f"Unknown VAE encode output type: {type(encoded)}")
+
+            # Normalize latents
+            latents = (latents - latent_shift) / latent_magnitude
+            all_latents.append(latents.cpu())
+
+        # Process text with CLIP
+        # Extract only the part after "within 2 0 words assistant "
+        marker = "within 2 0 words assistant "
+        prompt_text = prompt
+        if marker in prompt:
+            prompt_text = prompt.split(marker, 1)[1]
+        else:
+            # Fallback to the old method if marker not found
+            prompt_text = prompt
+        
+        text_embedding = encode_text_with_clip(prompt_text)
+        all_text_embeddings.append(text_embedding)
+
+        # Save to disk
+        torch.save(latents.squeeze(0).cpu(), os.path.join(save_dir, f"latent_{idx}.pt"))
+        torch.save(text_embedding, os.path.join(save_dir, f"text_emb_{idx}.pt"))
+        
+        log_file = os.path.join(dataset_dir, "cache_log.txt")
+        # os.makedirs(log_file, exist_ok=True)
+
+        if idx % 100 == 0:
+            line = f"✅ Cached {idx}/{len(dataset)}: '{prompt[:500]}...'\n"
+            print(line.strip())
+
+            # Append to file in realtime
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+
+
+    # Save prompts
     with open(os.path.join(save_dir, "prompts.txt"), "w", encoding='utf-8') as f:
-        for prompt in prompts:
-            f.write(prompt + "\n")
-    
-    # Aggregate for quick sanity stats
-    all_latents = torch.concat(all_latents, dim=0)
+        f.write("\n".join(prompts))
+
+    # Aggregate stats
+    all_latents = torch.cat(all_latents, dim=0)
     all_text_embeddings = torch.stack(all_text_embeddings, dim=0)
-    
-    print(f"Latents shape: {all_latents.shape}, mean: {all_latents.mean()}, var: {all_latents.var()}")
-    print(f"Text embeddings shape: {all_text_embeddings.shape}, mean: {all_text_embeddings.mean()}")
-    print(f"✅ Cached {len(dataset)} latent files and text embeddings to {save_dir}")
+
+    print(f"Latents shape: {all_latents.shape}, mean: {all_latents.mean():.4f}, var: {all_latents.var():.4f}")
+    print(f"Text embeddings shape: {all_text_embeddings.shape}, mean: {all_text_embeddings.mean():.4f}")
+    print(f"✅ Finished caching {len(dataset)} samples to {save_dir}")
+
 
 # ==================================================
 # CachedLatentDataset (unchanged interface)
@@ -317,7 +301,7 @@ class CachedLatentDataset(Dataset):
 # ==================================================
 # LoadData now uses QueenVL (no random styles)
 # ==================================================
-def LoadData(prompt_style="queenvl", regenerate_prompts=True):
+def LoadData(prompt_style="queenvl", regenerate_prompts=False):
     """
     Load butterfly dataset with Qwen2-VL prompts (only).
     Args kept for compatibility with your code.
@@ -349,9 +333,9 @@ def LoadData(prompt_style="queenvl", regenerate_prompts=True):
         print(f"🔄 Caching latents + text embeddings with Qwen2-VL prompts...")
         os.makedirs(latent_cache_dir, exist_ok=True)
         # Save prompts alongside cache for CachedLatentDataset
-        with open(os.path.join(latent_cache_dir, "prompts.txt"), "w", encoding='utf-8') as f:
-            for _, prompt in dataset:
-                f.write(prompt + "\n")
+        # with open(os.path.join(latent_cache_dir, "prompts.txt"), "w", encoding='utf-8') as f:
+        #     for _, prompt in dataset:
+        #         f.write(prompt + "\n")
         cache_latents_to_disk(dataset, save_dir=latent_cache_dir)
     else:
         print(f"✅ Using existing cached latents from {latent_cache_dir}")
@@ -380,6 +364,9 @@ dataloader = None
 if __name__ == "__main__":
     # Load data using QueenVL prompts
     dataloader = LoadData(prompt_style="queenvl", regenerate_prompts=True)
+
+    if dataloader is None:
+        raise RuntimeError("Dataloader failed to initialize!")
 
     for batch in dataloader:
         print(len(batch), type(batch))

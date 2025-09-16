@@ -4,6 +4,21 @@ import os
 import json
 import datetime
 
+# Import sensitive configuration
+try:
+    from config.sensitive_config import (
+        MLFLOW_TRACKING_URI,
+        MLFLOW_EXPERIMENT_NAME,
+        OLD_RUN_ID,
+        VAE_ENCODER_PATH,
+        VAE_DECODER_PATH,
+        LATENT_SHIFT,
+        LATENT_MAGNITUDE
+    )
+except ImportError:
+    # Fallback values or raise error
+    print("Sensitive configuration not found. Using default values.")
+
 
 def get_unique_output_dir(base_dir):
     base_dir = os.path.abspath(base_dir)
@@ -43,7 +58,7 @@ output_channels = 4
 base_channels = 64
 time_embedding_dim = 128
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 CONFIG = {
     "image_size": image_size,
@@ -80,10 +95,10 @@ print_config(CONFIG)
 
 # ------------------- LOGGING ------------------- #
 def log_config_mlflow(cfg, is_ml_flow_off=False, old_run=False):
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    mlflow.set_experiment("asad - text_emb + cus_vae + unet")
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
     if old_run:
-        mlflow.start_run(run_id='3bb016f503a94971b24e00910655db52')
+        mlflow.start_run(run_id=OLD_RUN_ID)
     elif not is_ml_flow_off:
         for k, v in cfg.items():
             mlflow.log_param(k, v)
@@ -119,13 +134,12 @@ if __name__ == "__main__":
 from vae_custom.custom_vae_wrap import load_custom_vae
 
 vae = load_custom_vae(
-    encoder_ckpt_path="./vae_custom/checkpoints/encoder.pt",
-    decoder_ckpt_path="./vae_custom/checkpoints/decoder.pt",
+    encoder_ckpt_path=VAE_ENCODER_PATH,
+    decoder_ckpt_path=VAE_DECODER_PATH,
     device=device
 )
 
-# latent_shift = 0.01165771484375
-# latent_magnitude = 1.0478515625
-latent_shift = -0.06365966796875
-latent_magnitude = 1.0634765625
+# Use values from sensitive_config
+latent_shift = LATENT_SHIFT
+latent_magnitude = LATENT_MAGNITUDE
 # scaling_factor = 3.0/8.5

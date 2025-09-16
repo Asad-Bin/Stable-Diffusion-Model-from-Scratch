@@ -11,20 +11,48 @@ def get_sinusoidal_embedding(timesteps, time_emb_dim):
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)  # (B, time_emb_dim)
     return emb
 
-class AttentionBlock(nn.Module):
-    def __init__(self, channels, num_heads=4):
+# class SelfAttentionBlock(nn.Module):
+#     def __init__(self, channels, num_heads=4):
+#         super().__init__()
+#         self.norm = nn.GroupNorm(16, channels)
+#         self.attn = nn.MultiheadAttention(channels, num_heads, batch_first=True)
+#         self.proj = nn.Conv2d(channels, channels, kernel_size=1)
+
+#     def forward(self, x):
+#         B, C, H, W = x.shape
+#         h = self.norm(x)
+#         h = h.view(B, C, H * W).permute(0, 2, 1)  # (B, HW, C)
+#         attn_out, _ = self.attn(h, h, h)
+#         attn_out = attn_out.permute(0, 2, 1).view(B, C, H, W)
+#         return x + self.proj(attn_out)
+class CrossAttentionBlock(nn.Module):
+    def __init__(self, channels, num_heads=4, cross_attention=False):
         super().__init__()
         self.norm = nn.GroupNorm(16, channels)
+        self.cross_attention = cross_attention
         self.attn = nn.MultiheadAttention(channels, num_heads, batch_first=True)
         self.proj = nn.Conv2d(channels, channels, kernel_size=1)
 
-    def forward(self, x):
+    def forward(self, x, context=None):
+        """
+        x: (B, C, H, W) image features
+        context: (B, L, C) optional text embeddings (sequence)
+        """
         B, C, H, W = x.shape
         h = self.norm(x)
         h = h.view(B, C, H * W).permute(0, 2, 1)  # (B, HW, C)
-        attn_out, _ = self.attn(h, h, h)
+
+        if self.cross_attention and context is not None:
+            # Cross attention: queries = image features, keys/values = text embeddings
+            attn_out, _ = self.attn(query=h, key=context, value=context)
+        else:
+            # Self attention: queries=keys=values = image features
+            attn_out, _ = self.attn(h, h, h)
+
         attn_out = attn_out.permute(0, 2, 1).view(B, C, H, W)
         return x + self.proj(attn_out)
+
+
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim=None, text_emb_dim=None, num_groups=8):
@@ -67,10 +95,10 @@ class ConvBlock(nn.Module):
 
 
 class DownBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, time_emb_dim=None, text_emb_dim=None, use_attn=False, num_groups=8):
+    def __init__(self, in_channels, out_channels, time_emb_dim=None, text_emb_dim=None, cross_attn=False, num_groups=8):
         super().__init__()
         self.conv = ConvBlock(in_channels, out_channels, time_emb_dim, text_emb_dim, num_groups)
-        self.attn = AttentionBlock(out_channels) if use_attn else nn.Identity()
+        self.attn = CrossAttentionBlock(out_channels, cross_attention=cross_attn) if cross_attn else nn.Identity()
         self.pool = nn.MaxPool2d(2)
 
     # def forward(self, x, t_emb):
@@ -78,18 +106,20 @@ class DownBlock(nn.Module):
     #     x = self.attn(x)
     #     x_pooled = self.pool(x)
     #     return x, x_pooled
-    def forward(self, x, t_emb=None, text_emb=None):
+    def forward(self, x, t_emb=None, text_emb=None, context=None):
         x = self.conv(x, t_emb, text_emb)
-        x = self.attn(x)
+        if isinstance(self.attn, CrossAttentionBlock):
+            x = self.attn(x, context)
+        # x = self.attn(x)
         x_pooled = self.pool(x)
         return x, x_pooled
 
 class UpBlock(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, time_emb_dim=None, text_emb_dim=None, use_attn=False, num_groups=8):
+    def __init__(self, in_channels, skip_channels, out_channels, time_emb_dim=None, text_emb_dim=None, cross_attn=False, num_groups=8):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv = ConvBlock(skip_channels + out_channels, out_channels, time_emb_dim, text_emb_dim, num_groups)
-        self.attn = AttentionBlock(out_channels) if use_attn else nn.Identity()
+        self.attn = CrossAttentionBlock(out_channels, cross_attention=cross_attn) if cross_attn else nn.Identity()
 
     # def forward(self, x, skip, t_emb=None):
     #     x = self.up(x)
@@ -97,9 +127,10 @@ class UpBlock(nn.Module):
     #     x = self.conv(x, t_emb)
     #     x = self.attn(x)
     #     return x
-    def forward(self, x, skip, t_emb=None, text_emb=None):
+    def forward(self, x, skip, t_emb=None, text_emb=None, context=None):
         x = self.up(x)
         x = torch.cat([x, skip], dim=1)
         x = self.conv(x, t_emb, text_emb)
-        x = self.attn(x)
+        if isinstance(self.attn, CrossAttentionBlock):
+            x = self.attn(x, context)
         return x
