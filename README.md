@@ -29,7 +29,7 @@ The system allows for generating high-quality butterfly images based on text des
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd task1
+   cd Custom-Stable-Diffusion-Model
    ```
 
 2. Install dependencies using the requirements.txt file:

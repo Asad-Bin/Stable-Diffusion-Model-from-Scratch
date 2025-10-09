@@ -1,8 +1,13 @@
 import os
 import torch
+import sys
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from datasets import load_dataset
+
+# Add the project root to the Python path when running this script directly
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.config import *
 from utils.debug import *
@@ -77,7 +82,7 @@ def generate_prompt_with_queenvl(image_pil):
         setup_queenvl()
 
     query = (
-        "Describe this butterfly briefly but precisely: dominant colors, wing pattern (spots/stripes/borders), and notable features, within 20 words"
+        "Describe this butterfly in a simple, short sentence like: 'a green butterfly, wings are sharp with yellow spots, long antenna, mossaic pattern on body.'"
     )
 
     messages = [
@@ -98,10 +103,23 @@ def generate_prompt_with_queenvl(image_pil):
     with torch.no_grad():
         output = qvl_model.generate(**inputs, max_new_tokens=100)
 
-    description = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
-
+    full_response = qvl_processor.batch_decode(output, skip_special_tokens=True)[0]
+    
+    # Extract only the butterfly description part
+    # First try to find the assistant's response
+    if "assistant" in full_response.lower():
+        description = full_response.split("assistant", 1)[1].strip()
+    else:
+        # If we can't find "assistant", just use the last part of the response
+        description = full_response.split("\n")[-1].strip()
+    
+    # Clean up any remaining system prompts or instructions
+    description = description.replace(":", "").strip()
+    
+    # Ensure it fits within CLIP's token limit
     tokens = tokenizer(description, truncation=True, max_length=77)["input_ids"]
     description = tokenizer.decode(tokens, skip_special_tokens=True)
+    
     return description.strip()
  
 

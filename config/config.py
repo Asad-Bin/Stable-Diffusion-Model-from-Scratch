@@ -58,7 +58,7 @@ output_channels = 4
 base_channels = 64
 time_embedding_dim = 128
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 CONFIG = {
     "image_size": image_size,
@@ -131,15 +131,19 @@ if __name__ == "__main__":
 
 # ------------------- VAE SETTINGS  ------------------- #
 # from pre_vae.pre_vae import vae
-from vae_custom.custom_vae_wrap import load_custom_vae
+# from vae_custom.custom_vae_wrap import load_custom_vae
 
-vae = load_custom_vae(
-    encoder_ckpt_path=VAE_ENCODER_PATH,
-    decoder_ckpt_path=VAE_DECODER_PATH,
-    device=device
-)
+# vae = load_custom_vae(
+#     encoder_ckpt_path=VAE_ENCODER_PATH,
+#     decoder_ckpt_path=VAE_DECODER_PATH,
+#     device=device
+# )
+import pre_vae
+vae = pre_vae.vae
 
 # Use values from sensitive_config
-latent_shift = LATENT_SHIFT
-latent_magnitude = LATENT_MAGNITUDE
+# latent_shift = LATENT_SHIFT
+# latent_magnitude = LATENT_MAGNITUDE
+latent_shift = vae.latent_shift
+latent_magnitude = vae.latent_magnitude
 # scaling_factor = 3.0/8.5

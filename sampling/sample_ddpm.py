@@ -24,8 +24,8 @@ def sample_ddpm(model, betas, shape, device, vae=None, timesteps=timesteps, text
     if vae is not None:
         vae.eval()
         x = (x * latent_magnitude) + latent_shift
-        # x = x.half()
-        sampled = vae.decoder(x.float()).clamp(-1, 1)
+        x = x.to(dtype=vae.dtype)  # Match VAE's data type (float16)
+        sampled = vae.decoder(x).clamp(-1, 1)
         return sampled
     else:
         return x.clamp(-1, 1)

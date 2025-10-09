@@ -34,8 +34,7 @@ vae_train/*.out
 mlruns/
 
 # Model checkpoints and outputs
-output/output_*_*/checkpoints/
-output/output_*_*/training_outputs/
+output/
 vae_train/checkpoints/
 vae_train/saved_images/
 vae_train/test_images/

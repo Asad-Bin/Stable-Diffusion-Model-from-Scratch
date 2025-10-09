@@ -1,10 +1,3 @@
-# Updated training loop that (1) ensures CLIP embeddings are on-device,
-# (2) auto-creates a small projector if CLIP embedding dim != model expected text_emb_dim,
-# (3) passes projected text embeddings into the UNet (which handles cross-attention),
-# (4) keeps your existing logging/saving behavior.
-#
-# Drop this into the same file in place of your old train_model / __main__ sections.
-
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -45,7 +38,7 @@ def print_image(epoch):
         sample_shape = (num_samples, 4, image_size//8, image_size//8)
         
         #prompt 
-        random_prompts = ["a black and yellow butterfly with blue and white markings on its wings , featuring prominent black spots and a yellow border on its wings.", "a beautiful butterfly with green wings", "a butterfly with blue and black wings"]
+        random_prompts = ["a black and yellow butterfly with blue and white markings on its wings, featuring prominent black spots and a yellow border on its wings.", "a beautiful butterfly with green wings", "a butterfly with blue and black wings"]
         text_embedding = get_clip_text_embedding_batch(random_prompts, clip_tokenizer, clip_text_model, device)
 
         sampled = sample_ddpm(
