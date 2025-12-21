@@ -1,4 +1,4 @@
-# Custom Stable Diffusion Model
+# Custom Stable Diffusion Model from Scratch
 
 <p align="center">
   <img src="https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch" alt="PyTorch">
