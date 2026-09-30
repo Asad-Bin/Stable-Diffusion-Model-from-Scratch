@@ -1,105 +1,28 @@
-# Utils Module
+# utils
 
-Utility functions for debugging, training progress, and gradient analysis.
+Small helpers. Only `gradient_descent.py` is used by the training script.
 
-## Files
+## `debug.py`
 
-| File | Description |
-|------|-------------|
-| `debug.py` | Debugging utilities and tensor inspection |
-| `epoch_progress.py` | Training progress tracking and display |
-| `gradient_descent.py` | Gradient analysis and monitoring tools |
+Imports `config.config` (for `device`).
 
-## Debug Utilities
+| Symbol | Description |
+|---|---|
+| `is_local_test = False` | Master switch for memory printing |
+| `print_gpu_memory(tag)` | If `is_local_test` is true, prints `torch.cuda.memory_allocated/reserved` (MB) for `device`. Otherwise returns immediately. `main/main.py` calls it in many places. |
+| `clear_memory()` | Resets peak stats, `gc.collect()`, `cuda.empty_cache()`, `cuda.ipc_collect()`. Not called anywhere. |
 
-### `debug.py`
+Set `is_local_test = True` to see memory numbers (CUDA required).
 
-Tools for inspecting tensors and debugging training issues:
+## `gradient_descent.py`
 
-```python
-from utils.debug import *
+`plot_and_log_grad_norms(run_id, weight_metrics, bias_metrics, client)`: for each metric name it fetches the history with `MlflowClient.get_metric_history`, plots the metrics on one figure (legend labels with the `grad_norm_weight_` or `grad_norm_bias_` prefix removed), and logs the figure to the active run with `mlflow.log_image`:
 
-# Inspect tensor statistics
-print_tensor_stats(tensor)
-# Output: shape, dtype, min, max, mean, std, nan count
-```
+- `gradient_norms_-_weights_(first_conv_layers).png`
+- `gradient_norms_-_biases_(first_conv_layers).png`
 
-## Progress Tracking
+In `main/main.py` (`log_grad_plots`, called once per epoch) the lists are built from metric names starting with `grad_norm_weight_` / `grad_norm_bias_`. The metrics actually logged are `grad_norm_<parameter name>` (e.g. `grad_norm_enc1.conv.conv1.weight`) for parameters whose names contain both `weight` and `conv1`, and those never start with `grad_norm_weight_`. In practice both lists are empty, so both logged plots have no curves. Bias gradients are never logged.
 
-### `epoch_progress.py`
+## `epoch_progress.py`
 
-Utilities for displaying and tracking training progress:
-
-```python
-from utils.epoch_progress import EpochProgress
-
-progress = EpochProgress(total_epochs=3000)
-progress.update(current_epoch=100, loss=0.045)
-```
-
-## Gradient Analysis
-
-### `gradient_descent.py`
-
-Tools for monitoring gradient flow and detecting training issues:
-
-```python
-from utils.gradient_descent import (
-    log_gradient_norms,
-    check_gradient_health
-)
-
-# Log gradient norms for each layer
-log_gradient_norms(model)
-
-# Check for vanishing/exploding gradients
-health_report = check_gradient_health(model)
-```
-
-## Common Debugging Patterns
-
-### Tensor Inspection
-
-```python
-def debug_tensor(name, tensor):
-    print(f"{name}:")
-    print(f"  Shape: {tensor.shape}")
-    print(f"  Dtype: {tensor.dtype}")
-    print(f"  Device: {tensor.device}")
-    print(f"  Range: [{tensor.min():.4f}, {tensor.max():.4f}]")
-    print(f"  Mean: {tensor.mean():.4f}, Std: {tensor.std():.4f}")
-    print(f"  NaN count: {torch.isnan(tensor).sum().item()}")
-```
-
-### Gradient Monitoring
-
-```python
-def log_gradient_norms(model):
-    total_norm = 0.0
-    for name, param in model.named_parameters():
-        if param.grad is not None:
-            param_norm = param.grad.data.norm(2)
-            total_norm += param_norm.item() ** 2
-    total_norm = total_norm ** 0.5
-    return total_norm
-```
-
-## Usage in Training
-
-```python
-from utils.debug import *
-from utils.gradient_descent import log_gradient_norms
-
-# In training loop
-for epoch in range(num_epochs):
-    for batch in dataloader:
-        loss = train_step(batch)
-        loss.backward()
-        
-        # Log gradients periodically
-        if epoch % 100 == 0:
-            grad_norm = log_gradient_norms(model)
-            print(f"Epoch {epoch}: Gradient norm = {grad_norm:.4f}")
-        
-        optimizer.step()
-```
+`print_epoch_progress(current_epoch, total_epochs, bar_length=30)`: writes `\rEpoch n/N [====   ]` to stdout. Not used by the current scripts (the call in `vae_train/train.py` is commented out).

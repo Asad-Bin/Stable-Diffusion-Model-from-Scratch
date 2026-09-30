@@ -1,95 +1,32 @@
-# Pre-trained VAE Module
+# pre_vae
 
-Wrapper for loading pretrained Stable Diffusion VAE from Hugging Face.
+Pretrained VAE used by the diffusion pipeline.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `pre_vae.py` | VAE initialization and configuration |
-| `__init__.py` | Module exports for easy importing |
+- `pre_vae.py`: loads the model and exposes `vae`.
+- `__init__.py`: `from pre_vae.pre_vae import vae`, so `import pre_vae; pre_vae.vae` works. `config/config.py` uses exactly that.
 
-## Usage
-
-### Importing the VAE
+## What it loads
 
 ```python
-from pre_vae.pre_vae import vae
-
-# Or via package import
-import pre_vae
-vae = pre_vae.vae
+vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=torch.float16)
+vae = vae.to(device).eval()
 ```
 
-### Model Details
+That is **TAESD** (Tiny AutoEncoder for Stable Diffusion) through `diffusers.AutoencoderTiny`. It is not the Stable Diffusion KL-VAE. It uses fp16 weights and downsamples 8× (512×512 image ↔ 4×64×64 latent).
 
-- **Model**: `stabilityai/sd-vae-ft-mse`
-- **Source**: Hugging Face Diffusers
-- **Latent Channels**: 4
-- **Downsampling Factor**: 8× (512×512 → 64×64)
+## How the rest of the project uses it
 
-## VAE Operations
+| Where | Use |
+|---|---|
+| `config/config.py` | `vae = pre_vae.vae`; `latent_shift = vae.latent_shift`; `latent_magnitude = vae.latent_magnitude` (attributes of `AutoencoderTiny`) |
+| `dataset/load_dataset.py` | `vae.encode(image_fp16)` for caching, then `(z - latent_shift) / latent_magnitude` |
+| `sampling/sample_ddpm.py` | `x * latent_magnitude + latent_shift`, cast to `vae.dtype`, `vae.decoder(x).clamp(-1, 1)` |
 
-### Encoding (Image → Latent)
+## Notes
 
-```python
-# Input: RGB image tensor normalized to [-1, 1]
-# Shape: (B, 3, 512, 512)
-image = image_tensor.to(vae.dtype)
-
-# Encode to latent space
-latent = vae.encode(image).latent_dist.sample()
-# Output shape: (B, 4, 64, 64)
-
-# Apply scaling (optional)
-latent = (latent - vae.latent_shift) / vae.latent_magnitude
-```
-
-### Decoding (Latent → Image)
-
-```python
-# Input: Latent tensor
-# Shape: (B, 4, 64, 64)
-latent = latent_tensor.to(vae.dtype)
-
-# Undo scaling
-latent = (latent * vae.latent_magnitude) + vae.latent_shift
-
-# Decode to image
-image = vae.decoder(latent).clamp(-1, 1)
-# Output shape: (B, 3, 512, 512)
-```
-
-## Latent Space Parameters
-
-The VAE exposes normalization parameters:
-
-```python
-vae.latent_shift      # Mean shift for latent normalization
-vae.latent_magnitude  # Scale factor for latent normalization
-vae.dtype             # Model precision (float16/float32)
-```
-
-## Automatic Download
-
-The pretrained VAE is automatically downloaded on first use:
-- **Cache Location**: `~/.cache/huggingface/hub/`
-- **Approximate Size**: ~160MB
-
-## Switching to Custom VAE
-
-To use a custom VAE instead, modify `config/config.py`:
-
-```python
-# Comment out pretrained VAE
-# import pre_vae
-# vae = pre_vae.vae
-
-# Use custom VAE
-from vae_custom.custom_vae_wrap import load_custom_vae
-vae = load_custom_vae(
-    encoder_ckpt_path="vae_custom/checkpoints/encoder.pt",
-    decoder_ckpt_path="vae_custom/checkpoints/decoder.pt",
-    device=device
-)
-```
+- Requires the `diffusers` package, which is **not** in `requirements.txt`. Run `pip install diffusers`.
+- The `for params in vae.parameters(): params.required_grad = False` loop has a typo (`required_grad`, not `requires_grad`), so it freezes nothing. This is harmless because the VAE is only used under `no_grad`.
+- The module does `from config.config import *` to get `device`, while `config.config` imports this package back. It works because `device` is defined before `import pre_vae` in `config.py`. Import `config` first, or expect this ordering to matter.
+- The dtype is float16 on both CPU and GPU. On CPU some ops may be slow or unsupported.

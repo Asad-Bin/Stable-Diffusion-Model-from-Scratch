@@ -1,145 +1,60 @@
-# Model Module
+# model
 
-UNet architecture implementation for the diffusion model with cross-attention text conditioning.
+The text-conditioned UNet that predicts noise in latent space.
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `unet.py` | Main UNet class with encoder-decoder structure |
-| `blocks.py` | Building blocks: ConvBlock, DownBlock, UpBlock, CrossAttention |
+- `blocks.py`: `get_sinusoidal_embedding`, `CrossAttentionBlock`, `ConvBlock`, `DownBlock`, `UpBlock`
+- `unet.py`: `Unet`
 
-## Architecture
+## Building blocks (`blocks.py`)
 
-### UNet Overview
+| Block | Behavior |
+|---|---|
+| `get_sinusoidal_embedding(t, dim)` | Standard sin/cos embedding, `(B,) → (B, dim)`, base 10000 |
+| `CrossAttentionBlock(channels, num_heads=4, cross_attention=False)` | `GroupNorm(16)` → flatten to `(B, HW, C)` → `nn.MultiheadAttention` (query = image features; key/value = `context` if `cross_attention` and a context is given, else self-attention) → 1×1 conv → **residual add** |
+| `ConvBlock(in, out, time_emb_dim, text_emb_dim, num_groups=8)` | conv3×3 → GroupNorm → SiLU → **add `Linear(cat[t_emb, text_emb])` as a per-channel bias** → conv3×3 → GroupNorm → SiLU |
+| `DownBlock(in, out, ..., cross_attn)` | `ConvBlock` → optional `CrossAttentionBlock` → `MaxPool2d(2)`; returns `(x, x_pooled)` where `x` (pre-pool) is the skip |
+| `UpBlock(in, skip, out, ..., cross_attn)` | `ConvTranspose2d(k=2, s=2)` → concat skip → `ConvBlock` → optional `CrossAttentionBlock` |
 
-```
-Input Latent (4×64×64)
-        ↓
-    ┌─────────────────────────────────────┐
-    │            ENCODER                   │
-    │  enc1: 4 → 64 (DownBlock)           │
-    │  enc2: 64 → 128 (DownBlock)         │
-    │  enc3: 128 → 256 (DownBlock + Attn) │
-    └─────────────────────────────────────┘
-        ↓
-    ┌─────────────────────────────────────┐
-    │          BOTTLENECK                  │
-    │  256 → 512 (ConvBlock + CrossAttn)  │
-    └─────────────────────────────────────┘
-        ↓
-    ┌─────────────────────────────────────┐
-    │            DECODER                   │
-    │  dec3: 512 → 256 (UpBlock + Attn)   │
-    │  dec2: 256 → 128 (UpBlock)          │
-    │  dec1: 128 → 64 (UpBlock)           │
-    └─────────────────────────────────────┘
-        ↓
-Output Predicted Noise (4×64×64)
-```
+## `Unet` (`unet.py`)
 
-## UNet Class
+Defaults: `input_ch=4, base_ch=64, output_ch=4, time_emb_dim=128, text_emb_dim=512, time_steps=1000, num_groups=8`.
 
-### Initialization
+Conditioning:
+- `t_emb = SiLU(Linear(sinusoidal(t)))`, dim 128.
+- `text_emb_proj = Linear(512→128)(text_emb)`; mean-pooled if the input has a sequence axis. If `text_emb is None`, zeros are used (created on the module-level `config.device`).
+- `comb = cat[t_emb, text_emb_proj]` (256-d). It is injected into every `ConvBlock` (via `t_emb` and `text_emb_proj` separately) and used as the single-token cross-attention context.
+
+Shapes for a `(B, 4, 64, 64)` input:
+
+| Stage | In → out channels | Spatial | Cross-attn |
+|---|---|---|---|
+| `enc1` | 4 → 64 | 64 (skip) → 32 | – |
+| `enc2` | 64 → 128 | 32 (skip) → 16 | – |
+| `enc3` | 128 → 256 | 16 (skip) → 8 | ✔ context = `enc3_ctx_proj(comb)` |
+| `base` | 256 → 512 | 8 | ✔ (`base_att`, context = `base_ctx_proj(comb)`) |
+| `dec3` | 512 (+256 skip) → 256 | 8 → 16 | ✔ context = `dec3_ctx_proj(comb)` |
+| `dec2` | 256 (+128 skip) → 128 | 16 → 32 | – |
+| `dec1` | 128 (+64 skip) → 64 | 32 → 64 | – |
+| `out` | 64 → 4 (1×1 conv) | 64 | – |
+
+`forward(x, t, text_emb=None) → (B, 4, 64, 64)`: predicted noise.
+
+## Things to know
+
+- The cross-attention context is **one token** (`(B, 1, C)`) derived from the timestep and the pooled prompt. Softmax over one key is always 1, so these blocks reduce to a learned, spatially-constant projection of that vector, not per-word attention. The prompt is reduced to a mean-pooled 512-d vector before it enters the model.
+- `use_attn_enc` and `use_attn_dec` are accepted but ignored. Only `use_attn_bottleneck` has an effect.
+- `text_emb_dim` sets the input width of `text_proj`; everything downstream uses `time_emb_dim`.
+- The old self-attention block and older forward variants remain as comments in `blocks.py`.
+- No dropout, no classifier-free-guidance dropout, and no time-conditioned residual scaling.
+
+## Usage
 
 ```python
 from model.unet import Unet
-
-model = Unet(
-    input_ch=4,              # Input channels (VAE latent)
-    base_ch=64,              # Base channel multiplier
-    output_ch=4,             # Output channels
-    time_emb_dim=128,        # Time embedding dimension
-    text_emb_dim=512,        # CLIP embedding dimension
-    time_steps=1000,         # Total diffusion timesteps
-    use_attn_bottleneck=True,# Enable bottleneck attention
-    num_groups=8             # GroupNorm groups
-)
+model = Unet(input_ch=4, output_ch=4, base_ch=64, time_emb_dim=128, text_emb_dim=512, num_groups=8)
+eps_hat = model(z_t, t, text_emb=clip_vec)   # z_t: (B,4,64,64), t: (B,) long, clip_vec: (B,512)
 ```
 
-### Forward Pass
-
-```python
-# Inputs
-x = latent_tensor        # (B, 4, 64, 64)
-t = timestep_tensor      # (B,) integer timesteps
-text_emb = clip_embedding # (B, 512) or (B, L, 512)
-
-# Forward
-noise_pred = model(x, t, text_emb=text_emb)
-# Output shape: (B, 4, 64, 64)
-```
-
-## Building Blocks
-
-### `ConvBlock`
-
-Basic convolutional block with time and text conditioning:
-
-```python
-ConvBlock(
-    in_channels=128,
-    out_channels=256,
-    time_emb_dim=128,
-    text_emb_dim=128,
-    num_groups=8
-)
-```
-
-### `DownBlock`
-
-Encoder block with convolution and optional cross-attention:
-
-```python
-DownBlock(
-    in_channels=64,
-    out_channels=128,
-    time_emb_dim=128,
-    text_emb_dim=128,
-    cross_attn=False  # Enable for text conditioning
-)
-```
-
-### `UpBlock`
-
-Decoder block with transposed convolution, skip connections, and optional attention:
-
-```python
-UpBlock(
-    in_channels=256,
-    skip_channels=128,
-    out_channels=128,
-    time_emb_dim=128,
-    text_emb_dim=128,
-    cross_attn=True
-)
-```
-
-### `CrossAttentionBlock`
-
-Multi-head cross-attention for text conditioning:
-
-```python
-CrossAttentionBlock(
-    channels=256,
-    cross_attention=True
-)
-```
-
-## Conditioning Mechanism
-
-### Time Embedding
-- Sinusoidal positional encoding for timestep `t`
-- Projected through MLP: `Linear → SiLU`
-
-### Text Embedding
-- CLIP text features projected to match time embedding dim
-- Mean-pooled if sequence length > 1
-- Concatenated with time embedding for context projection
-
-### Context Fusion
-```python
-# Combined embedding for cross-attention context
-comb = torch.cat([t_emb, text_emb_proj], dim=-1)  # (B, 2×time_emb_dim)
-context = context_proj(comb).unsqueeze(1)          # (B, 1, C)
-```
+`unet.py` imports `config.config`, which loads the VAE on import.

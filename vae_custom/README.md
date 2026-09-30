@@ -1,149 +1,68 @@
-# Custom VAE Module
+# vae_custom
 
-Custom Variational Autoencoder implementation optimized for the target image domain.
+A small VAE written from scratch (encoder, decoder, blocks) and a wrapper to load its checkpoints. It is trained by [`vae_train`](../vae_train/). **The diffusion pipeline currently uses the pretrained TAESD VAE instead** (see [pre_vae](../pre_vae/)); the custom-VAE lines in `config/config.py` are commented out.
+
+There is no `__init__.py` in this directory (it works as a namespace package).
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `encoder.py` | VAE Encoder network |
-| `decoder.py` | VAE Decoder network |
-| `blocks.py` | Building blocks: ResidualBlock, AttentionBlock |
-| `custom_vae_wrap.py` | Wrapper for loading and using the custom VAE |
-| `checkpoints/` | Directory for encoder and decoder weights |
+| File | Contents |
+|---|---|
+| `blocks.py` | `SelfAttention`, `AttentionBlock`, `ResidualBlock`, `ResAttnBlock` |
+| `encoder.py` | `Encoder(latent_channels=4)` |
+| `decoder.py` | `Decoder()` |
+| `custom_vae_wrap.py` | `CustomVAEWrapper`, `load_custom_vae` |
+| `checkpoints/encoder.pt`, `decoder.pt` | Tracked weights (~14.7 MB and ~9.0 MB), copied from epoch 1000 by `vae_train/checkpoint_updater.py` |
 
-## Architecture
+## Blocks
 
-### Encoder
+- `SelfAttention(n_heads, embd_dim)`: manual multi-head attention (`in_proj` → q, k, v; scaled dot-product; optional causal mask; `out_proj`).
+- `AttentionBlock(channels)`: `GroupNorm(32)` → single-head `SelfAttention` over `H·W` tokens → residual add.
+- `ResidualBlock(in, out)`: `GroupNorm(8)` → SiLU → conv3×3 → `GroupNorm(8)` → conv3×3 (no SiLU before the second conv), plus a 1×1 conv (or identity) skip.
+- `ResAttnBlock(in, out, use_attn=True)`: `ResidualBlock` + `AttentionBlock`. **Not used** by the encoder or decoder (the attention calls are commented out).
 
-Compresses 512×512 RGB images to 64×64 latent representations:
-
-```
-Input (3, 512, 512)
-    ↓ Conv2d (stride=2)
-(64, 256, 256)
-    ↓ ResidualBlock + Conv2d (stride=2)
-(128, 128, 128)
-    ↓ ResidualBlock + Conv2d (stride=2)
-(256, 64, 64)
-    ↓ ResidualBlock
-    ↓ Conv2d (mu) + Conv2d (logvar)
-Latent (4, 64, 64) + KL terms
-```
-
-### Decoder
-
-Reconstructs 512×512 images from latent codes:
+## Encoder: `(B, 3, 512, 512) → z, mu, logvar`, each `(B, 4, 64, 64)`
 
 ```
-Latent (4, 64, 64)
-    ↓ Conv2d + ResidualBlock
-(256, 64, 64)
-    ↓ ConvTranspose2d (stride=2) + ResidualBlock
-(128, 128, 128)
-    ↓ ConvTranspose2d (stride=2) + ResidualBlock
-(64, 256, 256)
-    ↓ ConvTranspose2d (stride=2)
-(32, 512, 512)
-    ↓ Conv2d + Tanh
-Output (3, 512, 512)
+Conv4×4 s2 (3→64) + SiLU                      256×256
+ResidualBlock 64→128
+Conv4×4 s2 (128→128) + SiLU                   128×128
+ResidualBlock 128→256
+Conv4×4 s2 (256→256) + SiLU                   64×64
+ResidualBlock 256→256
+conv_mu, conv_logvar: Conv3×3 256→4
+z = mu + ε·exp(0.5·logvar)                    (always sampled, even in eval())
 ```
 
-## Usage
+## Decoder: `(B, 4, 64, 64) → (B, 3, 512, 512)` in [-1, 1]
 
-### Loading the Custom VAE
+```
+Conv3×3 4→256 + SiLU
+ResidualBlock 256→256
+ConvTranspose4×4 s2 256→128 + SiLU            128×128
+ResidualBlock 128→128
+ConvTranspose4×4 s2 128→64  + SiLU            256×256
+ResidualBlock 64→64
+ConvTranspose4×4 s2 64→32   + SiLU            512×512
+Conv3×3 32→3, tanh
+```
+
+## Wrapper
 
 ```python
 from vae_custom.custom_vae_wrap import load_custom_vae
-
-vae = load_custom_vae(
-    encoder_ckpt_path="vae_custom/checkpoints/encoder.pt",
-    decoder_ckpt_path="vae_custom/checkpoints/decoder.pt",
-    device="cuda"
-)
+vae = load_custom_vae("vae_custom/checkpoints/encoder.pt", "vae_custom/checkpoints/decoder.pt", device)
+z = vae.encode(images)     # returns the sampled z only (mu, logvar are dropped)
+x = vae.decode(z)
 ```
 
-### Encoding Images
+`CustomVAEWrapper` puts both parts in `eval()` and sets `requires_grad=False`.
 
-```python
-from vae_custom.encoder import Encoder
+## Using it in the diffusion pipeline (not done by default)
 
-encoder = Encoder(latent_channels=4)
-encoder.load_state_dict(torch.load("checkpoints/encoder.pt"))
+The rest of the code expects a `diffusers.AutoencoderTiny`-like object, and the wrapper differs:
 
-# Encode
-z, mu, logvar = encoder(image)  # image: (B, 3, 512, 512)
-# z: (B, 4, 64, 64) - reparameterized latent
-```
-
-### Decoding Latents
-
-```python
-from vae_custom.decoder import Decoder
-
-decoder = Decoder()
-decoder.load_state_dict(torch.load("checkpoints/decoder.pt"))
-
-# Decode
-reconstructed = decoder(z)  # z: (B, 4, 64, 64)
-# reconstructed: (B, 3, 512, 512)
-```
-
-## Building Blocks
-
-### `ResidualBlock`
-
-```python
-from vae_custom.blocks import ResidualBlock
-
-block = ResidualBlock(in_channels=128, out_channels=256)
-```
-
-Features:
-- Two convolutions with SiLU activation
-- Skip connection with projection if channels differ
-- GroupNorm for normalization
-
-### `AttentionBlock`
-
-```python
-from vae_custom.blocks import AttentionBlock
-
-attn = AttentionBlock(channels=256)
-```
-
-Features:
-- Self-attention mechanism
-- Spatial attention for capturing long-range dependencies
-
-## Checkpoints
-
-Store trained weights in `checkpoints/`:
-
-```
-vae_custom/
-├── checkpoints/
-│   ├── encoder.pt    # Encoder weights
-│   └── decoder.pt    # Decoder weights
-├── encoder.py
-├── decoder.py
-└── ...
-```
-
-## Training
-
-See `vae_train/` module for VAE training scripts. The custom VAE is trained separately before diffusion model training.
-
-## Switching Between VAEs
-
-In `config/config.py`:
-
-```python
-# Use custom VAE
-from vae_custom.custom_vae_wrap import load_custom_vae
-vae = load_custom_vae(encoder_path, decoder_path, device)
-
-# OR use pretrained VAE
-# import pre_vae
-# vae = pre_vae.vae
-```
+- `sample_ddpm` calls `vae.decoder(x)` and reads `vae.dtype` (the wrapper has `.decoder` but no `.dtype`).
+- `cache_latents_to_disk` calls `vae.eval().to(device).half()` and expects `vae.encode(...)` to return an object with `latent_dist`/`latents`/`sample`, or a tensor. The wrapper returns a tensor, which is accepted.
+- `latent_shift` and `latent_magnitude` must be provided separately (`config.py` has a commented-out block reading them from `sensitive_config`).
+- Cached latents must be regenerated after switching VAEs.

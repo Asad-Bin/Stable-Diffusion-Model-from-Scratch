@@ -1,265 +1,144 @@
 # Custom Stable Diffusion Model from Scratch
 
 <p align="center">
-  <img src="https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch" alt="PyTorch">
-  <img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch" alt="PyTorch">
+  <img src="https://img.shields.io/badge/Python-3776AB?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/MLflow-Tracking-0194E2?logo=mlflow" alt="MLflow">
 </p>
 
-A custom implementation of a latent diffusion model for text-to-image generation, featuring a UNet-based denoiser with CLIP text conditioning and support for both custom and pretrained VAE architectures.
+A from-scratch **latent diffusion** (DDPM) pipeline for text-to-image generation on the Smithsonian butterflies dataset. The denoiser is a hand-written, text-conditioned UNet that operates on 4×64×64 latents of 512×512 images. Captions are produced automatically by Qwen2-VL and embedded with CLIP. A custom VAE is also included, but the pipeline currently uses the pretrained TAESD VAE.
 
-## ✨ Key Features
+## ✨ What the code does
 
-- **UNet Diffusion Architecture** — Custom UNet with cross-attention blocks for text-conditioned image generation
-- **CLIP Text Conditioning** — Leverages OpenAI's CLIP model for semantic text-to-image alignment
-- **Dual VAE Support** — Choose between a custom-trained VAE or pretrained Stable Diffusion VAE
-- **Qwen2-VL Integration** — Automatic caption generation for training images using Qwen2-VL vision-language model
-- **Latent Space Training** — Efficient training in compressed latent space (64×64 latents for 512×512 images)
-- **Experiment Tracking** — Full MLflow integration for logging metrics, parameters, and artifacts
-- **Caching System** — Disk caching for VAE latents and text embeddings to accelerate training
+- **Custom UNet** (`model/`): 3 down blocks, a bottleneck, 3 up blocks, conditioned on a sinusoidal timestep embedding and a CLIP text embedding. Cross-attention is used in `enc3`, the bottleneck and `dec3`.
+- **Automatic captions** (`dataset/load_dataset.py`): `Qwen/Qwen2-VL-2B-Instruct` writes one short caption per image.
+- **CLIP text conditioning** (`dataset/clip.py`): `openai/clip-vit-base-patch16`, mean-pooled over tokens (512-d).
+- **Latent caching**: images are encoded once by the VAE and stored as `.pt` files, so training never touches pixels.
+- **DDPM** (`noise/`, `sampling/`): linear β schedule, 1000 steps, ε-prediction with L1 loss, ancestral sampling.
+- **Pretrained VAE** (`pre_vae/`): `madebyollin/taesd` (`diffusers.AutoencoderTiny`), fp16.
+- **Custom VAE** (`vae_custom/`, `vae_train/`): a small conv/residual VAE trained with MSE + β·KL. Checkpoints are in `vae_custom/checkpoints/`, but it is **not wired into the diffusion pipeline** (see below).
+- **MLflow** logging for loss, gradient norms, sample images and checkpoints.
 
-## 📁 Project Structure
+## 🧭 Pipeline
 
 ```
-Custom-Stable-Diffusion-Model/
-├── config/              # Configuration files and hyperparameters
-├── dataset/             # Dataset loading, CLIP encoding, and caching utilities
-├── img_generation/      # Inference scripts for generating images from checkpoints
-├── main/                # Training entry point and main execution loop
-├── model/               # UNet architecture with attention blocks
-├── noise/               # Noise scheduling and forward diffusion process
-├── pre_vae/             # Pretrained VAE wrapper (Stable Diffusion VAE)
-├── sampling/            # DDPM sampling algorithm for image generation
-├── utils/               # Utility functions for debugging and training
-├── vae_custom/          # Custom VAE encoder/decoder implementation
-├── vae_train/           # VAE training scripts and utilities
-├── requirements.txt     # Python dependencies
-└── run.sh               # Shell script for quick execution
+HF dataset (huggan/smithsonian_butterflies_subset)
+   │  resize 512×512, normalize to [-1, 1]
+   ├─► Qwen2-VL-2B  ──► caption per image  ──► generated_prompts_queenvl.txt
+   └─► TAESD VAE encode (fp16) ──► (z - latent_shift) / latent_magnitude
+                                        │
+                        cached_latents_queenvl/latent_{i}.pt  (4×64×64)
+                                        ▼
+   DataLoader(latent, text_emb, prompt)   batch 32
+                                        ▼
+   prompt ─► CLIP ViT-B/16 (recomputed every batch, 512-d) ─┐
+   t ~ U{0..999}; z_t = √ᾱ·z0 + √(1-ᾱ)·ε                    ▼
+                                            Unet(z_t, t, text_emb) ─► ε̂
+                                            loss = L1(ε̂, ε)   AdamW + cosine LR
+Sampling: N(0, I) ─► 1000 DDPM steps ─► ×latent_magnitude + latent_shift ─► vae.decoder ─► image
 ```
 
-### 📚 Module Documentation
+## 📁 Project structure
 
-Each module contains its own README with detailed documentation:
+```
+.
+├── config/          # hyperparameters, output dirs, device, VAE selection, MLflow helpers
+├── dataset/         # HF dataset, Qwen2-VL captions, latent cache, CLIP model
+├── img_generation/  # CLI: generate a 4×4 grid from a trained run's latest checkpoint
+├── main/            # training script (main.py) and resume helper (old_run.py)
+├── model/           # Unet + building blocks
+├── noise/           # beta schedule and forward diffusion
+├── pre_vae/         # pretrained TAESD VAE (loaded on import)
+├── sampling/        # DDPM reverse process + VAE decode
+├── utils/           # GPU memory helpers, gradient-norm plots, progress bar
+├── vae_custom/      # custom VAE encoder/decoder, wrapper, tracked .pt checkpoints
+├── vae_train/       # custom VAE training / evaluation scripts
+├── requirements.txt
+├── run.sh           # background launcher for main.main
+└── LICENSE          # MIT
+```
 
-| Module | Description | Key Components |
-|--------|-------------|----------------|
-| [config](./config/) | Configuration management | `config.py`, `sensitive_config.py` |
-| [dataset](./dataset/) | Data pipeline & caching | `ButterflyDatasetWithPrompts`, `CachedLatentDataset`, CLIP encoding |
-| [img_generation](./img_generation/) | Inference & generation | Checkpoint loading, batch generation, MLflow integration |
-| [main](./main/) | Training entry point | Training loop, loss computation, checkpoint saving |
-| [model](./model/) | UNet architecture | `Unet`, `DownBlock`, `UpBlock`, `CrossAttentionBlock` |
-| [noise](./noise/) | Diffusion process | `linear_beta_schedule`, `forward_diffusion_sample` |
-| [pre_vae](./pre_vae/) | Pretrained VAE | Stable Diffusion VAE wrapper (`sd-vae-ft-mse`) |
-| [sampling](./sampling/) | Image generation | `sample_ddpm` - DDPM reverse diffusion |
-| [utils](./utils/) | Utilities | Debugging, gradient analysis, progress tracking |
-| [vae_custom](./vae_custom/) | Custom VAE | `Encoder`, `Decoder`, `ResidualBlock` |
-| [vae_train](./vae_train/) | VAE training | Training scripts, dataloader, visualization |
+| Module | Contents |
+|---|---|
+| [config](./config/) | `config.py`: globals, `CONFIG` dict, MLflow/config logging helpers |
+| [dataset](./dataset/) | `load_dataset.py` (`LoadData`, `ButterflyDatasetWithPrompts`, `CachedLatentDataset`), `clip.py` |
+| [img_generation](./img_generation/) | `img_generation.py` |
+| [main](./main/) | `main.py` (`train_model`, `print_image`), `old_run.py` |
+| [model](./model/) | `unet.py` (`Unet`), `blocks.py` |
+| [noise](./noise/) | `linear_beta_schedule`, `prepare_alphas`, `forward_diffusion_sample` |
+| [pre_vae](./pre_vae/) | `vae` (TAESD) |
+| [sampling](./sampling/) | `sample_ddpm` |
+| [utils](./utils/) | `debug.py`, `gradient_descent.py`, `epoch_progress.py` |
+| [vae_custom](./vae_custom/) | `Encoder`, `Decoder`, `CustomVAEWrapper`, `load_custom_vae` |
+| [vae_train](./vae_train/) | `train.py`, `test.py`, `dataloader.py`, `checkpoint_updater.py`, `plot.py` |
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.8+
-- CUDA-compatible GPU (recommended: 24GB+ VRAM)
-- PyTorch 2.0+
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Asad-Bin/Stable-Diffusion-Model-from-Scratch.git
-   cd Stable-Diffusion-Model-from-Scratch
-   ```
-
-2. **Create a virtual environment** (recommended)
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure sensitive settings**
-   
-   Create `config/sensitive_config.py` with your configuration:
-   ```python
-   # MLflow settings
-   MLFLOW_TRACKING_URI = "sqlite:///mlruns.db"
-   MLFLOW_EXPERIMENT_NAME = "custom-diffusion"
-   
-   # VAE checkpoint paths (for custom VAE)
-   VAE_ENCODER_PATH = "vae_custom/checkpoints/encoder.pt"
-   VAE_DECODER_PATH = "vae_custom/checkpoints/decoder.pt"
-   
-   # Latent space normalization
-   LATENT_SHIFT = 0.0
-   LATENT_MAGNITUDE = 1.0
-   
-   # For resuming training
-   OLD_RUN_ID = None
-   ```
-
-### Dataset Setup
-
-Download and prepare the Smithsonian Butterflies dataset:
+## 🚀 Setup
 
 ```bash
-mkdir -p dataset/huggingface_butterflies
-python -c "from datasets import load_dataset; \
-    dataset = load_dataset('huggan/smithsonian_butterflies_subset', split='train'); \
-    dataset.save_to_disk('dataset/huggingface_butterflies')"
+git clone https://github.com/Asad-Bin/Stable-Diffusion-Model-from-Scratch.git
+cd Stable-Diffusion-Model-from-Scratch
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install diffusers        # imported by pre_vae/pre_vae.py but NOT listed in requirements.txt
 ```
 
-### Training
+Notes:
 
-Start training the diffusion model:
+- `config/sensitive_config.py` is git-ignored and **optional for training**. `config/config.py` tries to import `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT_NAME`, `OLD_RUN_ID`, `VAE_ENCODER_PATH`, `VAE_DECODER_PATH`, `LATENT_SHIFT`, `LATENT_MAGNITUDE` from it and only prints a warning if the file is missing. Those names are used only by `python -m config.config` (MLflow param logging) and by the commented-out custom-VAE block.
+- Model weights (Qwen2-VL, CLIP, TAESD) and the dataset are downloaded from the Hugging Face Hub on first use.
+- `config.py` selects `cuda:1` if CUDA is available, otherwise CPU. With one GPU, edit the device in `config/config.py`.
+- Qwen2-VL captioning is only run if the prompt file is missing (or `regenerate_prompts=True`), so a GPU is effectively required for the first run.
+
+## 🏋️ Train
 
 ```bash
+# foreground
 python -m main.main
+
+# background (sets MY_TIMESTAMP, logs to output/0_output_logs/log_<timestamp>.out)
+bash run.sh
 ```
 
-Training progress is automatically logged to MLflow and checkpoints are saved to the `output/` directory.
+Start an MLflow server first if you want to use one (`mlflow server --port 5000`). `main.main` does **not** call `mlflow.set_tracking_uri`. Unless `MLFLOW_TRACKING_URI` is set in the environment, MLflow logs to a local `./mlruns` directory.
 
-### Inference
+Each run writes to `output/output_<timestamp>/` (`MY_TIMESTAMP` from `run.sh`, otherwise the current time):
 
-Generate images using a trained checkpoint:
+```
+output/output_<ts>/
+├── checkpoints/checkpoint_epoch_<N>.pth   # every 50 epochs, last 5 kept
+└── training_outputs/epoch_<NNNN>_samples.png
+```
+
+Key hyperparameters (`config/config.py`, `main/main.py`): 3000 epochs, batch 32, AdamW lr 1e-4, cosine LR to 1e-6, T=1000, β 1e-4→0.02, `Unet(base_ch=64, time_emb_dim=128, text_emb_dim=512, num_groups=8)`.
+
+## 🎨 Generate
 
 ```bash
-python -m img_generation.img_generation --run_id <MLFLOW_RUN_ID>
+python -m img_generation.img_generation --run_id <mlflow_run_id> [--output_dir <path>]
 ```
 
-## ⚙️ Configuration
+Reads `output_dir` from the run's params (needs an MLflow server at `http://127.0.0.1:5000`, or pass `--output_dir`), loads the highest-numbered checkpoint, and writes a 4×4 grid, with the prompt stamped on top, to `<output_dir>/generated_output/`.
 
-### Model Configuration (`config/config.py`)
+## 🧪 Custom VAE (optional)
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `image_size` | 512 | Output image resolution |
-| `batch_size` | 32 | Training batch size |
-| `num_epochs` | 3000 | Total training epochs |
-| `timesteps` | 1000 | Diffusion timesteps |
-| `learning_rate` | 0.0001 | Optimizer learning rate |
-| `save_image_every` | 5 | Sample generation interval (epochs) |
-| `checkpoint_interval` | 50 | Checkpoint saving interval (epochs) |
-
-### VAE Options
-
-**Option 1: Pretrained VAE** (Default)
-- Uses `stabilityai/sd-vae-ft-mse` from Hugging Face
-- Automatically downloaded on first use
-- Recommended for general-purpose generation
-
-**Option 2: Custom VAE**
-- Trained specifically on your dataset
-- Modify `config/config.py` to use custom VAE:
-  ```python
-  from vae_custom.custom_vae_wrap import vae  # Custom VAE
-  # from pre_vae.pre_vae import vae           # Pretrained VAE
-  ```
-
-## 🏗️ Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Training Pipeline                         │
-├─────────────────────────────────────────────────────────────────┤
-│  Image → VAE Encoder → Latent (4×64×64) → Add Noise → UNet     │
-│                                                  ↑               │
-│  Text Prompt → CLIP Encoder → Text Embedding ────┘               │
-│                                                                  │
-│  UNet predicts noise → MSE Loss → Gradient Update                │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                        Inference Pipeline                        │
-├─────────────────────────────────────────────────────────────────┤
-│  Text Prompt → CLIP Encoder → Text Embedding                     │
-│                                       ↓                          │
-│  Random Noise → DDPM Sampling (1000 steps) → Clean Latent        │
-│                                       ↓                          │
-│                              VAE Decoder → Generated Image        │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### UNet Architecture
-
-The UNet consists of:
-- **Encoder**: 3 downsampling blocks with cross-attention at the deepest level
-- **Bottleneck**: ConvBlock with cross-attention for text conditioning
-- **Decoder**: 3 upsampling blocks with skip connections and cross-attention
-- **Conditioning**: Time embeddings + CLIP text embeddings projected and fused
-
-## 📊 Experiment Tracking
-
-MLflow tracks all experiments with:
-- Training metrics (loss, gradients)
-- Hyperparameters and configuration
-- Model checkpoints
-- Generated sample images
-
-Launch the MLflow UI:
 ```bash
-mlflow ui --port 5000
+python -m vae_train.train                 # trains; needs MLflow at 127.0.0.1:5000
+python -m vae_train.checkpoint_updater    # copies epoch-1000 weights to vae_custom/checkpoints/
 ```
 
-## 🔧 Cache Management
+See [vae_train](./vae_train/) and [vae_custom](./vae_custom/). To use it for diffusion you would have to enable the commented block in `config/config.py` **and** provide `latent_shift`/`latent_magnitude`, `.dtype` and a `.decoder` compatible with `sample_ddpm`.
 
-The project uses caching to optimize training:
+## ⚠️ Known issues (verified from the code)
 
-Caches are git-ignored and are generated automatically on the first training run.
-
-### Prompt Cache
-- Location: `dataset/huggingface_butterflies/generated_prompts_queenvl.txt`
-- Contains Qwen2-VL generated captions
-
-### Latent Cache
-- Location: `dataset/huggingface_butterflies/cached_latents_queenvl/`
-- Contains pre-computed VAE latents and CLIP embeddings
-
-**Clear caches** (if changing models or parameters):
-```bash
-rm -f dataset/huggingface_butterflies/generated_prompts_queenvl.txt
-rm -rf dataset/huggingface_butterflies/cached_latents_queenvl
-```
-
-## 🐛 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `ModuleNotFoundError` | Run from project root using `python -m main.main` |
-| CUDA OOM | Reduce `batch_size` in `config/config.py` |
-| VAE loading fails | Verify checkpoint paths in `sensitive_config.py` |
-| Slow training | Enable latent caching; first epoch generates cache |
-
-## 📝 Requirements
-
-```
-torch>=1.10.0
-torchvision>=0.11.0
-numpy>=1.20.0
-matplotlib>=3.4.0
-mlflow>=1.20.0
-datasets>=2.0.0
-Pillow>=8.0.0
-transformers>=4.15.0
-scikit-learn>=1.0.0
-tqdm>=4.60.0
-tensorboard>=2.5.0
-huggingface_hub>=0.4.0
-accelerate>=0.5.0
-```
+1. **Caption/latent misalignment.** `CachedLatentDataset` sorts filenames lexicographically (`latent_1`, `latent_10`, `latent_100`, …, `latent_2`), but reads `prompts.txt` by numeric index. For most items the caption returned does not belong to the returned latent. The caching step itself is correct; the pairing at load time is not.
+2. **Resume is a no-op.** In `main/main.py`, `from main import old_run` shadows the `old_run` boolean from `config`, so `if old_run == True` is always false.
+3. **`is_ml_flow_off = True` skips checkpoints and samples.** The `continue` after `scheduler.step()` skips the checkpoint and sampling code.
+4. **Import-time side effects.** Importing `main.main` runs `LoadData()` (dataset download, CLIP + Qwen setup, cache build if missing). `img_generation` imports `main.main`, so it triggers all of this. `vae_train.train`, `vae_train.test`, and `vae_train.dataloader` also run work on import.
+5. **Cache uses a different CLIP than training.** The cached `text_emb_*.pt` come from `clip-vit-base-patch32` (L2-normalized) and are not used. Training re-embeds prompts with `clip-vit-base-patch16`.
+6. **`requirements.txt` misses `diffusers`.**
+7. **Device mismatch.** `config.py` uses `cuda:1`, `img_generation` and `vae_train` use `cuda:0`.
 
 ## 📄 License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Hugging Face Diffusers](https://github.com/huggingface/diffusers) for pretrained VAE models
-- [OpenAI CLIP](https://github.com/openai/CLIP) for text encoding
-- [Qwen2-VL](https://github.com/QwenLM/Qwen2-VL) for vision-language captioning
-- [Smithsonian Butterflies Dataset](https://huggingface.co/datasets/huggan/smithsonian_butterflies_subset) for training data
+MIT. See [LICENSE](./LICENSE).

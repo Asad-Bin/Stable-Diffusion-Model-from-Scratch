@@ -1,116 +1,32 @@
-# Noise Module
+# noise
 
-Noise scheduling and forward diffusion process implementation for DDPM.
-
-## Files
-
-| File | Description |
-|------|-------------|
-| `noise_generation.py` | Beta schedule and forward diffusion sampling |
+Forward (noising) side of DDPM. Single file: `noise_generation.py`.
 
 ## Functions
 
-### `linear_beta_schedule()`
+| Function | Description |
+|---|---|
+| `linear_beta_schedule(timesteps, start=1e-4, end=0.02)` | `torch.linspace(start, end, timesteps)`, CPU tensor |
+| `prepare_alphas(betas)` | Returns `(alphas, alphas_cumprod, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod)` with `alphas = 1 - betas` |
+| `forward_diffusion_sample(x0, t, betas, sqrt_ac, sqrt_1mac)` | `@torch.no_grad()`. Draws `eps ~ N(0, I)` like `x0` and returns `(x_t, eps)` with `x_t = sqrt_ac[t]·x0 + sqrt_1mac[t]·eps`. |
 
-Creates a linear noise schedule for the diffusion process:
+`betas` is accepted by `forward_diffusion_sample` but not used in the computation. All operands are moved to `config.device`, so the return value is on that device regardless of where the inputs were.
+
+## Math
+
+```
+x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε ,   ε ~ N(0, I),   ᾱ_t = ∏_{s≤t} (1 − β_s)
+```
+
+## Usage (as in `main/main.py`)
 
 ```python
-from noise.noise_generation import linear_beta_schedule
-
-betas = linear_beta_schedule(
-    timesteps=1000,    # Number of diffusion steps
-    start=1e-4,        # Starting beta value
-    end=0.02           # Ending beta value
-)
-# Returns: Tensor of shape (1000,)
+betas = linear_beta_schedule(timesteps=1000, start=1e-4, end=0.02).to(device)
+_, _, sqrt_ac, sqrt_1mac = prepare_alphas(betas)
+t = torch.randint(0, 1000, (B,), device=device)
+z_t, noise = forward_diffusion_sample(z0, t, betas=betas, sqrt_ac=sqrt_ac, sqrt_1mac=sqrt_1mac)
 ```
 
-### `prepare_alphas()`
+`z0` are the cached, normalized VAE latents `(B, 4, 64, 64)`. Only the linear schedule exists (no cosine schedule).
 
-Computes alpha values from betas for diffusion:
-
-```python
-from noise.noise_generation import prepare_alphas
-
-alphas, alphas_cumprod, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = prepare_alphas(betas)
-```
-
-**Returns:**
-- `alphas` — `1 - betas`
-- `alphas_cumprod` — Cumulative product of alphas
-- `sqrt_alphas_cumprod` — √(ᾱₜ) for forward diffusion
-- `sqrt_one_minus_alphas_cumprod` — √(1 - ᾱₜ) for noise scaling
-
-### `forward_diffusion_sample()`
-
-Adds noise to clean samples according to the diffusion schedule:
-
-```python
-from noise.noise_generation import forward_diffusion_sample
-
-x_t, noise = forward_diffusion_sample(
-    x0=clean_latent,           # Clean latent (B, C, H, W)
-    t=timesteps,               # Timestep tensor (B,)
-    betas=betas,
-    sqrt_ac=sqrt_alphas_cumprod,
-    sqrt_1mac=sqrt_one_minus_alphas_cumprod
-)
-```
-
-**Returns:**
-- `x_t` — Noised latent at timestep t
-- `eps` — The noise that was added (used as target)
-
-## Diffusion Mathematics
-
-### Forward Process
-
-The forward diffusion adds Gaussian noise:
-
-```
-q(xₜ|x₀) = N(xₜ; √ᾱₜ·x₀, (1-ᾱₜ)·I)
-```
-
-Reparameterized as:
-```
-xₜ = √ᾱₜ · x₀ + √(1-ᾱₜ) · ε
-```
-
-where `ε ~ N(0, I)`
-
-### Schedule Visualization
-
-```
-β (beta)
-  ↑
-  │          ╱
-  │        ╱
-  │      ╱
-  │    ╱
-  │  ╱
-  │╱
-  └──────────────→ t (timestep)
-  0        500      1000
-
-  Linear: β increases from 1e-4 to 0.02
-```
-
-## Usage in Training
-
-```python
-# During training loop
-betas = linear_beta_schedule(timesteps=1000).to(device)
-alphas, ac, sqrt_ac, sqrt_1mac = prepare_alphas(betas)
-
-# Sample random timesteps
-t = torch.randint(0, timesteps, (batch_size,), device=device)
-
-# Add noise
-x_t, noise = forward_diffusion_sample(x0, t, betas, sqrt_ac, sqrt_1mac)
-
-# UNet predicts the noise
-noise_pred = model(x_t, t, text_emb=text_embeddings)
-
-# MSE loss
-loss = F.mse_loss(noise_pred, noise)
-```
+The module imports `device` from `config.config`.

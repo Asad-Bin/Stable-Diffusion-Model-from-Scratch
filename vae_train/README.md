@@ -1,140 +1,59 @@
-# VAE Training Module
+# vae_train
 
-Scripts and utilities for training the custom Variational Autoencoder.
+Training, evaluation and export scripts for the custom VAE in [`vae_custom`](../vae_custom/). No `__init__.py`; scripts use relative imports, so run them with `python -m vae_train.<name>` from the repo root.
+
+> `train.py`, `test.py` and `dataloader.py` have no `__main__` guard. Importing them starts work (downloading data, training, or evaluating).
 
 ## Files
 
-| File | Description |
-|------|-------------|
-| `train.py` | Main VAE training script |
-| `test.py` | VAE evaluation and reconstruction testing |
-| `dataloader.py` | Dataset loading for VAE training |
-| `config.py` | VAE-specific training configuration |
-| `plot.py` | Visualization utilities for training progress |
-| `checkpoint_updater.py` | Checkpoint management utilities |
+| File | Role |
+|---|---|
+| `config.py` | `device = cuda:0` (else CPU), `image_size=512`, `num_epochs=1000`, `learning_rate=1e-4`, `batch_size=8` |
+| `dataloader.py` | `HuggingFaceImageDataset`, `LoadData()`, `load_test_images()`; builds `dataloader` at import |
+| `train.py` | Training loop |
+| `test.py` | Reconstruct test images with a saved checkpoint |
+| `checkpoint_updater.py` | Copy a checkpoint pair into `vae_custom/checkpoints/` |
+| `plot.py` | `local(outputs)`: matplotlib preview of the first reconstruction (the call is commented out) |
 
-## Training the VAE
+## Data (`dataloader.py`)
 
-### Quick Start
+- Training: `huggan/smithsonian_butterflies_subset` (train split), `Resize(512, 512)` → `ToTensor` → `Normalize(0.5, 0.5)`, `DataLoader(batch_size=8, shuffle=True, num_workers=2)`. Items are `(image, 0)`.
+- Test images: `load_test_images()` reads every `vae_train/test_images/*.png` (resize 512, normalize to [-1, 1]) and stacks them. The directory is git-ignored, so **you must create it and add PNGs**. The `path_pattern` argument of the function is ignored.
+
+## Training (`train.py`)
 
 ```bash
+mlflow server --port 5000        # required: URI is hardcoded
 python -m vae_train.train
 ```
 
-### Training Configuration
+- MLflow: `http://127.0.0.1:5000`, experiment `Custom_VAE_Training`, run name `vae_run`.
+- Model: `Encoder` + `Decoder` from `vae_custom`, one `AdamW(lr=1e-4)` over both, `CosineAnnealingLR(T_max=1000, eta_min=1e-6)` stepped per epoch.
+- Loss: `MSE(recon, image) + β(epoch) · KL`, with `KL = -0.5 · mean(1 + logvar − mu² − exp(logvar))` and `β(epoch) = 1e-4 · min(1, epoch / 10)`. (A `beta = 0.1` variable is defined but unused.)
+- Resume: if `vae_train/checkpoints/encoder_epoch_500.pt` and `decoder_epoch_500.pt` exist, it loads them and continues from epoch 500. Otherwise it starts from 0. To resume from another epoch, edit `resume_epoch`. Optimizer and scheduler state are **not** saved or restored.
+- Each epoch: saves the first 2 originals interleaved with their reconstructions to `vae_train/saved_images/train_recon_<epoch>.png` (single overwriting folder, epoch in the filename) and uploads it to MLflow.
+- Logged: `grad_norm` (first batch of each epoch), `recon_loss`, `kl_loss`, `total_loss`, `lr`.
+- Every 100 epochs: `vae_train/checkpoints/{encoder,decoder}_epoch_<N>.pt` (also logged as MLflow artifacts).
 
-Edit `vae_train/config.py`:
-
-```python
-# Training parameters
-batch_size = 32
-num_epochs = 1000
-learning_rate = 1e-4
-
-# Loss weights
-kl_weight = 0.0001      # KL divergence weight
-recon_weight = 1.0      # Reconstruction loss weight
-```
-
-## Training Pipeline
-
-### `train.py`
-
-Main training loop with:
-- Reconstruction loss (MSE)
-- KL divergence regularization
-- Learning rate scheduling
-- Checkpoint saving
-
-```python
-# VAE loss function
-loss = recon_loss + kl_weight * kl_loss
-
-where:
-  recon_loss = MSE(reconstructed, original)
-  kl_loss = KL(q(z|x) || p(z))
-```
-
-## Data Loading
-
-### `dataloader.py`
-
-Prepares image datasets for VAE training:
-
-```python
-from vae_train.dataloader import get_vae_dataloader
-
-dataloader = get_vae_dataloader(
-    dataset_path="dataset/huggingface_butterflies",
-    batch_size=32,
-    image_size=512
-)
-```
-
-## Testing & Evaluation
-
-### `test.py`
-
-Evaluate reconstruction quality:
+## Evaluation (`test.py`)
 
 ```bash
 python -m vae_train.test
 ```
 
-Features:
-- Computes reconstruction MSE
-- Visualizes original vs. reconstructed images
-- Analyzes latent space distribution
+At import it runs `evaluate_vae("vae_train/checkpoints")`. It loads `encoder_epoch_1000.pt` / `decoder_epoch_1000.pt` (`chkpnt_epoch`), then for each image in `vae_train/test_images/`:
+- Reconstructs it (`z` is still sampled from the encoder).
+- Prints `MSE + β(0)·KL`, where `β(0)` is 0, so this equals the MSE.
+- Saves `[original, reconstruction]` to `vae_train/testing_outputs/test_eval_<i>.png` (written twice; the argparse parser at the top is unused).
 
-## Visualization
+## Exporting to `vae_custom` (`checkpoint_updater.py`)
 
-### `plot.py`
-
-Training progress visualization:
-
-```python
-from vae_train.plot import plot_training_curves
-
-plot_training_curves(
-    losses=train_losses,
-    save_path="vae_training_curve.png"
-)
+```bash
+python -m vae_train.checkpoint_updater
 ```
 
-## Checkpoint Management
+Copies `vae_train/checkpoints/{encoder,decoder}_epoch_<copy_target>.pt` (`copy_target = 1000`) to `vae_custom/checkpoints/encoder.pt` and `decoder.pt`.
 
-### `checkpoint_updater.py`
+## Git
 
-Utilities for managing VAE checkpoints:
-
-```python
-from vae_train.checkpoint_updater import save_checkpoint, load_checkpoint
-
-# Save
-save_checkpoint(
-    encoder=encoder,
-    decoder=decoder,
-    epoch=100,
-    path="checkpoints/"
-)
-
-# Load
-encoder, decoder = load_checkpoint("checkpoints/", device="cuda")
-```
-
-## Output Structure
-
-```
-vae_train/
-├── outputs/
-│   ├── reconstructions/    # Sample reconstructions during training
-│   └── training_curves/    # Loss plots
-└── checkpoints saved to vae_custom/checkpoints/
-```
-
-## Training Tips
-
-1. **Start with low KL weight** — Prevents posterior collapse
-2. **Monitor reconstruction quality** — Visual inspection is important
-3. **Train for sufficient epochs** — VAE needs 500+ epochs typically
-4. **Check latent distributions** — Should approximate N(0, 1)
+`vae_train/checkpoints/`, `saved_images/`, `test_images/` and `testing_outputs/` are git-ignored.
