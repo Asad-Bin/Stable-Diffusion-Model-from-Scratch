@@ -16,10 +16,12 @@ build/
 /.venv/
 /.env/
 
-# Project specific data
-dataset/huggingface_butterflies/
-dataset/cached_latents/
-dataset/cache_log.txt
+# Project specific data (generated; regenerate via python -m main.main)
+**/huggingface_butterflies/
+**/cached_latents*/
+**/cache_log.txt
+**/generated_prompts_*.txt
+dataset/dataset/
 
 # Sensitive configuration
 config/sensitive_config.py

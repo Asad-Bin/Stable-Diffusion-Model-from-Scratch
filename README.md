@@ -68,8 +68,8 @@ Each module contains its own README with detailed documentation:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/Custom-Stable-Diffusion-Model.git
-   cd Custom-Stable-Diffusion-Model
+   git clone https://github.com/Asad-Bin/Stable-Diffusion-Model-from-Scratch.git
+   cd Stable-Diffusion-Model-from-Scratch
    ```
 
 2. **Create a virtual environment** (recommended)
@@ -108,12 +108,10 @@ Each module contains its own README with detailed documentation:
 Download and prepare the Smithsonian Butterflies dataset:
 
 ```bash
-cd dataset
 mkdir -p dataset/huggingface_butterflies
 python -c "from datasets import load_dataset; \
     dataset = load_dataset('huggan/smithsonian_butterflies_subset', split='train'); \
     dataset.save_to_disk('dataset/huggingface_butterflies')"
-cd ..
 ```
 
 ### Training
@@ -212,18 +210,20 @@ mlflow ui --port 5000
 
 The project uses caching to optimize training:
 
+Caches are git-ignored and are generated automatically on the first training run.
+
 ### Prompt Cache
-- Location: `dataset/dataset/huggingface_butterflies/prompts/`
+- Location: `dataset/huggingface_butterflies/generated_prompts_queenvl.txt`
 - Contains Qwen2-VL generated captions
 
 ### Latent Cache
-- Location: `dataset/dataset/huggingface_butterflies/latents/`
+- Location: `dataset/huggingface_butterflies/cached_latents_queenvl/`
 - Contains pre-computed VAE latents and CLIP embeddings
 
 **Clear caches** (if changing models or parameters):
 ```bash
-rm -rf dataset/dataset/huggingface_butterflies/prompts/*
-rm -rf dataset/dataset/huggingface_butterflies/latents/*
+rm -f dataset/huggingface_butterflies/generated_prompts_queenvl.txt
+rm -rf dataset/huggingface_butterflies/cached_latents_queenvl
 ```
 
 ## 🐛 Troubleshooting
